@@ -6,3 +6,6 @@ venv/
 .streamlit/secrets.toml
 .agents/
 .claude/
+BACKUP_RC1_1_1/
+__pycache__/
+*.pyc
