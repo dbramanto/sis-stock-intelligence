@@ -1,0 +1,1 @@
+IMPLEMENTASI: install Python 3.11+, extract ZIP, jalankan `pip install -r requirements.txt`, lalu `streamlit run app.py`. Paste langsung 3 tabel Stockbit dan tekan PROCESS SIS. Dockerfile tersedia untuk deployment cloud.

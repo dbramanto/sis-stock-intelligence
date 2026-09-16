@@ -1,0 +1,1 @@
+streamlit>=1.40\npandas>=2.0\nnumpy>=1.26\n
