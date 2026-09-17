@@ -1,5 +1,5 @@
 import streamlit as st, pandas as pd
-from sis_core import parse,norm,merge,eng,duplicate_symbols,dedupe_for_merge,batch_coverage
+from sis_core import parse,norm,merge,eng,duplicate_symbols,dedupe_for_merge,batch_coverage,align_to_expected,conflict_details,systematic_conflict_diagnosis,missing_value_details,align_batches_with_evidence
 from stage2_adapter import run_stage2
 
 st.set_page_config(page_title="SIS MVP",layout="wide")
@@ -7,12 +7,31 @@ st.title("SIS — Stock Intelligence System")
 st.caption("RC1.1.1 + STAGE 2 LOGIC FREEZE • data integrity • horizon screening • risk families")
 
 if "x" not in st.session_state:
- st.session_state.x=pd.DataFrame();st.session_state.raw=pd.DataFrame();st.session_state.conf=[];st.session_state.coverage=pd.DataFrame();st.session_state.blocked=False;st.session_state.stage2=None
+ st.session_state.x=pd.DataFrame();st.session_state.raw=pd.DataFrame();st.session_state.conf=[];st.session_state.conf_detail=pd.DataFrame();st.session_state.null_detail=pd.DataFrame();st.session_state.schema_diag=[];st.session_state.coverage=pd.DataFrame();st.session_state.blocked=False;st.session_state.gate_state="PASS";st.session_state.stage2=None
 
-EXPECTED=[
- ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Price MA 200","Average Directional Index 14","Average Directional Index DI+ 14","Average Directional Index DI- 14","MACD (12,26)","Previous MACD (12,26)","Previous RSI (14)","Average True Range 14","Average Daily Range 14","Value","Rank (RS 3m)","Rank (RS 6m)","Rank (RS 9m)"],
- ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Net Profit Margin (TTM)(%)","Return On Invested Capital (TTM)","Piotroski F-Score","Earnings Yield (TTM)","Debt to Equity Ratio (Quarter)","EPS (TTM YoY Growth)"],
- ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Operating Cash Flow (Quarter)","Free cash flow (TTM)","Free cash flow (Quarter)","Net Income (Quarter)","Net Income (Annual)","Net Income (TTM)","Net Income (YTD)"]]
+def display_table(df,height=None,numbered=False):
+ d=df.copy()
+ if numbered and not d.empty:
+  d.insert(0,"No.",range(1,len(d)+1))
+ kwargs={"use_container_width":True,"hide_index":True}
+ if height is not None: kwargs["height"]=height
+ st.dataframe(d,**kwargs)
+
+from app_schema import EXPECTED
+
+def reset_processing_state():
+ # Clear every derived object before each PROCESS run so failed/reduced input
+ # can never reuse candidates or Stage 2 results from a previous run.
+ st.session_state.x=pd.DataFrame()
+ st.session_state.raw=pd.DataFrame()
+ st.session_state.conf=[]
+ st.session_state.conf_detail=pd.DataFrame()
+ st.session_state.null_detail=pd.DataFrame()
+ st.session_state.schema_diag=[]
+ st.session_state.coverage=pd.DataFrame()
+ st.session_state.blocked=True
+ st.session_state.gate_state="BLOCKED"
+ st.session_state.stage2=None
 
 p=st.sidebar.radio("Menu",["Import","Validation","Candidates","Stage 2","Stock Intelligence"])
 
@@ -21,24 +40,40 @@ if p=="Import":
  for i,a in enumerate(tabs):
   with a:v.append(st.text_area("Paste tabel Stockbit",height=280,key=str(i)))
  if st.button("PROCESS SIS",type="primary",use_container_width=True):
-  parsed=[parse(q) for q in v];ds=[norm(d) for d in parsed];fatal=False
+  reset_processing_state()
+  parsed=[parse(q) for q in v]
+  aligned,schema_diag,alignment_gate=align_batches_with_evidence(parsed,EXPECTED)
+  st.session_state.schema_diag=schema_diag
+  ds=[norm(d) for d in aligned];st.session_state.null_detail=missing_value_details(aligned,ds);fatal=bool(alignment_gate.get("blocked"))
+  if alignment_gate.get("blocked"):
+   st.error("SCHEMA ALIGNMENT: BLOCKED — " + alignment_gate.get("message","periksa format kolom."))
   for i,d in enumerate(ds):
    missing=[c for c in EXPECTED[i] if c not in d.columns]
    dup=duplicate_symbols(d)
    if d.empty or missing:
     fatal=True;st.error(f"Batch {i+1}: FAIL — {len(d)} rows — missing: {', '.join(missing) if missing else 'data tidak terbaca'}")
-   else:st.success(f"Batch {i+1}: PASS — {d.Symbol.nunique()} unique symbols — {len(EXPECTED[i])-1} metrics")
+   else:
+    st.success(f"Batch {i+1}: PASS — {d.Symbol.nunique()} unique symbols — {len(EXPECTED[i])-1} metrics")
+    diag=schema_diag[i] if i < len(schema_diag) else {}
+    if diag.get("realigned"):
+     st.info(f"Batch {i+1}: format kolom berhasil dinormalisasi ke SIS schema.")
    if dup:
     fatal=True;st.error(f"Batch {i+1}: DUPLICATE SYMBOL — {', '.join(dup)} — processing BLOCKED sampai data diperbaiki.")
-  if not any(d.empty for d in ds):
+  if fatal:
+   st.error("DATA INTEGRITY GATE: BLOCKED — lengkapi/perbaiki Batch 1–3 sebelum Stage 2.")
+  if not fatal and not any(d.empty for d in ds):
    safe=[dedupe_for_merge(d) for d in ds];cov=batch_coverage(safe);st.session_state.coverage=cov
    complete=int((cov["Data Confidence"]=="COMPLETE").sum());partial=len(cov)-complete
    if partial==0:st.success(f"Cross-Batch Integrity: PASS — {complete}/{len(cov)} symbols COMPLETE")
    else:st.warning(f"Cross-Batch Integrity: REVIEW — {complete} COMPLETE / {partial} PARTIAL — partial candidates tetap disimpan.")
    raw,cf=merge(safe);st.session_state.raw=raw;st.session_state.conf=cf
+   detail=conflict_details(safe);st.session_state.conf_detail=detail
+   diagnosis=systematic_conflict_diagnosis(detail,len(cov))
    x=eng(raw).merge(cov[["Symbol","Batch Coverage","Data Confidence"]],on="Symbol",how="left")
    price_conf=any(q.get("Field")=="Price" for q in cf)
    st.session_state.blocked=fatal or price_conf
+   nonprice_conflict=(not detail.empty) and not price_conf
+   st.session_state.gate_state="BLOCKED" if st.session_state.blocked else ("REVIEW" if (partial or nonprice_conflict) else "PASS")
    x["Execution State"]="AVAILABLE"
    if st.session_state.blocked:x["Execution State"]="BLOCKED"
    else:x.loc[x["Data Confidence"]!="COMPLETE","Execution State"]="DATA REVIEW"
@@ -46,22 +81,47 @@ if p=="Import":
     if q.get("Field")=="Price":x.loc[x.Symbol==q["Symbol"],"Execution State"]="BLOCKED"
    st.session_state.x=x
    st.session_state.stage2=run_stage2(safe) if not fatal and not price_conf else None
-   if cf:st.error(f"{len(cf)} cross-batch conflict(s) ditemukan. Price conflict = BLOCKED.")
-   if fatal:st.error("DATA INTEGRITY GATE: BLOCKED — perbaiki duplicate/schema error sebelum execution.")
-   else:st.success(f"{len(raw)} saham berhasil diproses tanpa membuang partial candidate.")
+   if st.session_state.stage2 is not None and st.session_state.gate_state=="REVIEW":
+    st.session_state.stage2["integrity"]["state"]="REVIEW"
+   if not detail.empty:
+    price_rows=detail[detail["Field"]=="Price"]
+    affected=detail["Symbol"].nunique()
+    if price_conf:
+     st.error(f"DATA INTEGRITY: BLOCKED — {len(detail)} conflict detail(s), {len(price_rows)} Price conflict(s), {affected} saham terdampak.")
+    else:
+     st.warning(f"DATA INTEGRITY: REVIEW — {len(detail)} conflict detail(s), {affected} saham terdampak.")
+    st.warning(diagnosis["message"])
+    st.markdown("**Conflict Details — nilai aktual per batch**")
+    display_table(detail,numbered=True)
+   st.success(f"{len(raw)} saham berhasil diproses tanpa membuang partial candidate.")
 
 elif p=="Validation":
  if st.session_state.x.empty:st.warning("Import dahulu.")
  else:
-  a,b,c,d=st.columns(4);a.metric("Symbols",len(st.session_state.x));b.metric("NULL",int(st.session_state.raw.isna().sum().sum()));c.metric("Conflicts",len(st.session_state.conf));d.metric("Gate","BLOCKED" if st.session_state.blocked else "PASS")
-  if not st.session_state.coverage.empty:st.dataframe(st.session_state.coverage,use_container_width=True)
-  if st.session_state.conf:st.dataframe(pd.DataFrame(st.session_state.conf),use_container_width=True)
+  a,b,c,d=st.columns(4);a.metric("Symbols",len(st.session_state.x));b.metric("NULL",len(st.session_state.null_detail));c.metric("Conflicts",len(st.session_state.conf_detail));d.metric("Gate",st.session_state.gate_state)
+  if not st.session_state.coverage.empty:display_table(st.session_state.coverage,numbered=True)
+  if not st.session_state.conf_detail.empty:
+   st.markdown("**Conflict Details — nilai aktual per batch**")
+   display_table(st.session_state.conf_detail,numbered=True)
   else:st.success("Tidak ada konflik nilai antar-batch.")
+  if not st.session_state.null_detail.empty:
+   st.markdown("**Missing Data Details — nilai sumber yang tidak tersedia**")
+   st.caption("NULL bukan otomatis error. SIS tidak mengisi nilai yang memang tidak tersedia dari sumber; dampaknya dinilai pada confidence/Stage 2 sesuai metric terkait.")
+   display_table(st.session_state.null_detail,numbered=True)
+  realigned=[d for d in st.session_state.schema_diag if d.get("realigned")]
+  if realigned:
+   st.info("Format kolom dinormalisasi otomatis: " + ", ".join(f"Batch {d['batch']}" for d in realigned) + ".")
 
 elif p=="Candidates":
  x=st.session_state.x
  if x.empty:st.warning("Belum ada hasil.")
- else:st.dataframe(x,use_container_width=True,height=600)
+ else:
+  counts=x["Execution State"].value_counts().to_dict() if "Execution State" in x else {}
+  st.subheader("Candidates — Hasil Integrity Gate")
+  st.caption("Daftar ini adalah kandidat data yang diteruskan setelah validasi, bukan peringkat atau rekomendasi beli/jual.")
+  a,b,c,d=st.columns(4)
+  a.metric("Candidates",len(x));b.metric("AVAILABLE",counts.get("AVAILABLE",0));c.metric("DATA REVIEW",counts.get("DATA REVIEW",0));d.metric("BLOCKED",counts.get("BLOCKED",0))
+  display_table(x,height=600,numbered=True)
 
 elif p=="Stage 2":
  s2=st.session_state.stage2
@@ -81,7 +141,7 @@ elif p=="Stage 2":
    sw=r["horizons"]["swing"];lt=r["horizons"]["long_term"]
    fam=", ".join(f"{k}: {v}" for k,v in r.get("risk_families",{}).items()) or "Tidak ada risiko utama"
    rows.append({"Symbol":r["symbol"],"Status":r["eligibility"],"Swing":f"{sw['raw_score']:.2f} / {sw['effective_priority']}","Long-Term":f"{lt['raw_score']:.2f} / {lt['effective_priority']}","Catatan":fam})
-  st.dataframe(pd.DataFrame(rows),use_container_width=True,height=520,hide_index=True)
+  display_table(pd.DataFrame(rows),height=520,numbered=True)
   sym=st.selectbox("Lihat alasan saham",sorted(r["symbol"] for r in results),key="stage2_symbol")
   r=next(q for q in results if q["symbol"]==sym)
   if r.get("stage2_state")!="EVALUATED":st.warning("Data saham ini belum lengkap, sehingga Stage 2 tidak memberi penilaian.")

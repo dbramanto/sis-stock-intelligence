@@ -38,7 +38,7 @@ check("PRICE CONFLICT BLOCKING", g["state"] == "BLOCKED", f"gate={g['state']}")
 
 # 4. Missing fundamental metrics must reduce confidence, not be interpreted as good data.
 b = deepcopy(base)
-for key in ("npm_ttm", "roic_ttm", "piotroski", "earnings_yield", "de_quarter", "eps_yoy"):
+for key in ("npm_ttm", "roic_ttm", "piotroski", "earnings_yield_ttm", "de_quarter", "eps_yoy"):
     if key in b[2]["ANTM"]:
         b[2]["ANTM"][key] = None
 r = evaluate_symbol("ANTM", b)
@@ -52,9 +52,9 @@ sym = "ANTM"
 for batch_no in (1, 2, 3):
     b[batch_no][sym]["price"] = 5000.0
 b[1][sym].update({
-    "ma20": 3000.0, "ma50": 2500.0, "ma200": 2000.0,
-    "rsi14": 68.0, "adx14": 45.0, "di_plus": 40.0, "di_minus": 10.0,
-    "volume": 500_000_000.0, "vol_ma20": 100_000_000.0
+    "price_ma20": 3000.0, "price_ma50": 2500.0, "price_ma200": 2000.0,
+    "rsi14": 68.0, "adx14": 45.0, "di_plus14": 40.0, "di_minus14": 10.0,
+    "volume": 500_000_000.0, "volume_ma20": 100_000_000.0
 })
 b[2][sym].update({"npm_ttm": -30.0, "roic_ttm": -20.0, "eps_yoy": -80.0})
 b[3][sym].update({
@@ -74,9 +74,9 @@ sym = "SLIS"
 for batch_no in (1, 2, 3):
     b[batch_no][sym]["price"] = 60.0
 b[1][sym].update({
-    "ma20": 80.0, "ma50": 90.0, "ma200": 100.0,
-    "rsi14": 30.0, "adx14": 15.0, "di_plus": 10.0, "di_minus": 30.0,
-    "volume": 20_000_000.0, "vol_ma20": 100_000_000.0
+    "price_ma20": 80.0, "price_ma50": 90.0, "price_ma200": 100.0,
+    "rsi14": 30.0, "adx14": 15.0, "di_plus14": 10.0, "di_minus14": 30.0,
+    "volume": 20_000_000.0, "volume_ma20": 100_000_000.0
 })
 b[2][sym].update({"npm_ttm": 20.0, "roic_ttm": 20.0, "eps_yoy": 30.0})
 b[3][sym].update({

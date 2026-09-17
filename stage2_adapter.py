@@ -29,4 +29,6 @@ def run_stage2(ds):
  b=frames_to_stage2(ds)
  gate=integrity_gate(b)
  universe=sorted(set().union(*(set(b[i]) for i in (1,2,3))))
+ if gate["state"] == "BLOCKED":
+  return {"integrity":gate,"results":[]}
  return {"integrity":gate,"results":[evaluate_symbol(sym,b) for sym in universe]}

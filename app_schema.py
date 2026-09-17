@@ -1,0 +1,4 @@
+EXPECTED=[
+ ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Price MA 200","Average Directional Index 14","Average Directional Index DI+ 14","Average Directional Index DI- 14","MACD (12,26)","Previous MACD (12,26)","Previous RSI (14)","Average True Range 14","Average Daily Range 14","Value","Rank (RS 3m)","Rank (RS 6m)","Rank (RS 9m)"],
+ ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Net Profit Margin (TTM)(%)","Return On Invested Capital (TTM)","Piotroski F-Score","Earnings Yield (TTM)","Debt to Equity Ratio (Quarter)","EPS (TTM YoY Growth)"],
+ ["Symbol","Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price","Operating Cash Flow (Quarter)","Free cash flow (TTM)","Free cash flow (Quarter)","Net Income (Quarter)","Net Income (Annual)","Net Income (TTM)","Net Income (YTD)"]]

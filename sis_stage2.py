@@ -72,8 +72,10 @@ def integrity_gate(batches: Dict[int, Dict[str, Dict[str, Optional[float]]]]) ->
     for sym in sorted(complete):
         prices = [batches[i][sym]["price"] for i in (1,2,3)]
         known = [p for p in prices if p is not None]
-        if len(known) >= 2 and len(set(known)) > 1:
-            conflicts.append(sym)
+        if len(known) >= 2:
+            base = known[0]
+            if any(not math.isclose(base, p, rel_tol=0.001, abs_tol=0.001) for p in known[1:]):
+                conflicts.append(sym)
     if conflicts:
         return {"state":"BLOCKED","reason":"price_conflict","symbols":conflicts,
                 "complete":len(complete),"universe":len(universe)}
@@ -99,18 +101,19 @@ def evaluate_symbol(sym: str, batches: Dict[int, Dict[str, Dict[str, Optional[fl
         return {"symbol":sym,"data_state":"PARTIAL","stage2_state":"NOT_EVALUATED"}
 
     # Technical evidence: daily/swing context only.
-    trend = 100.0 if b1["price"] > b1["price_ma20"] > b1["price_ma50"] else 0.0
-    ma200 = None if b1["price_ma200"] is None else (100.0 if b1["price"] > b1["price_ma200"] else 0.0)
+    price, ma20, ma50 = b1["price"], b1["price_ma20"], b1["price_ma50"]
+    trend = None if any(v is None for v in (price,ma20,ma50)) else (100.0 if price > ma20 > ma50 else 0.0)
+    ma200 = None if price is None or b1["price_ma200"] is None else (100.0 if price > b1["price_ma200"] else 0.0)
     adx = _grade(b1["adx14"], [(0,0),(20,35),(25,70),(35,100)])
-    di = 100.0 if b1["di_plus14"] > b1["di_minus14"] else 0.0
-    macd = 100.0 if b1["macd"] > b1["prev_macd"] else 0.0
+    di = None if b1["di_plus14"] is None or b1["di_minus14"] is None else (100.0 if b1["di_plus14"] > b1["di_minus14"] else 0.0)
+    macd = None if b1["macd"] is None or b1["prev_macd"] is None else (100.0 if b1["macd"] > b1["prev_macd"] else 0.0)
     rsi = b1["rsi14"]
     rsi_score = None if rsi is None else (100.0 if 55 <= rsi <= 68 else 70.0 if 50 <= rsi < 55 or 68 < rsi <= 70 else 25.0)
     rs3 = _grade(b1["rs3m"], [(0,0),(50,40),(80,70),(90,100)])
     rs6 = _grade(b1["rs6m"], [(0,0),(50,40),(80,70),(90,100)])
     technical, tech_conf = _mean_known([trend,ma200,adx,di,macd,rsi_score,rs3,rs6])
 
-    rvol = None if not b1["volume_ma20"] else b1["volume"]/b1["volume_ma20"]
+    rvol = None if b1["volume"] is None or not b1["volume_ma20"] else b1["volume"]/b1["volume_ma20"]
     rvol_score = _grade(rvol, [(0,0),(1,50),(1.2,75),(1.5,100)])
     adtv_score = _grade(b1["adtv30"], [(0,0),(5e9,50),(10e9,75),(25e9,100)])
     participation, part_conf = _mean_known([rvol_score,adtv_score])
@@ -196,6 +199,17 @@ def evaluate_symbol(sym: str, batches: Dict[int, Dict[str, Dict[str, Optional[fl
         eligibility="ELIGIBLE"
 
     # Separate horizon scores; no universal total score.
+    # Missing blocks remain UNKNOWN and are not silently treated as zero.
+    block_values = [technical, participation, fundamental, cash]
+    if any(v is None for v in block_values):
+        return {
+            "symbol":sym, "data_state":"COMPLETE", "stage2_state":"NOT_EVALUATED",
+            "reason":"insufficient_known_metrics",
+            "blocks":{"technical":technical,"participation":participation,
+                      "fundamental":fundamental,"cash_quality":cash},
+            "confidence":{"technical":round(tech_conf,2),"participation":round(part_conf,2),
+                          "fundamental":round(fund_conf,2),"cash_quality":round(cash_conf,2)}
+        }
     swing = .60*technical + .20*participation + .10*fundamental + .10*cash
     longterm = .15*technical + .05*participation + .45*fundamental + .35*cash
 

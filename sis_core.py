@@ -123,6 +123,100 @@ def merge(ds):
   d=d.drop(columns=[q for q in d if q!="Symbol" and q in x],errors="ignore");x=x.merge(d,on="Symbol",how="outer")
  return x,conf
 
+
+def align_to_expected(d, expected, batch_no=None):
+ """
+ Align Stockbit clipboard values to the SIS canonical schema by position only when:
+ - column count is exact,
+ - header names are the same set as expected,
+ - but DOM/header order differs.
+ This addresses Stockbit clipboard header-order anomalies without guessing missing columns.
+ Returns (aligned_df, diagnostic).
+ """
+ if d.empty or not expected:
+  return d.copy(), {"state":"NO_DATA","batch":batch_no,"realigned":False}
+ exp=[_clean_header(c) for c in expected]
+ got=[_clean_header(c) for c in d.columns]
+ if len(got)!=len(exp) or set(got)!=set(exp):
+  return d.copy(), {"state":"SCHEMA_MISMATCH","batch":batch_no,"realigned":False,
+                    "header_order":got,"expected_order":exp}
+ if got==exp:
+  return d.copy(), {"state":"ALIGNED","batch":batch_no,"realigned":False}
+ x=d.copy()
+ old=got[:]
+ x.columns=exp
+ return x, {"state":"REALIGNED","batch":batch_no,"realigned":True,
+            "header_order":old,"expected_order":exp}
+
+def conflict_details(ds, rtol=.001, atol=.001):
+ """
+ Compare common fields across all three batches and expose the actual value per batch.
+ One row = one Symbol/Field, avoiding duplicated pairwise conflict messages.
+ """
+ if len(ds)!=3:return pd.DataFrame()
+ clean=[dedupe_for_merge(d) for d in ds]
+ common=set(clean[0].columns)
+ for d in clean[1:]: common &= set(d.columns)
+ common.discard("Symbol")
+ syms=sorted(set().union(*(set(d["Symbol"]) for d in clean if "Symbol" in d)))
+ rows=[]
+ for sym in syms:
+  for field in sorted(common):
+   vals=[]
+   for d in clean:
+    q=d.loc[d["Symbol"]==sym,field]
+    vals.append(np.nan if q.empty else q.iloc[0])
+   known=[v for v in vals if pd.notna(v)]
+   if len(known)<2:continue
+   base=known[0]
+   mismatch=any(not np.isclose(base,v,rtol=rtol,atol=atol) for v in known[1:])
+   if not mismatch:continue
+   b1,b2,b3=vals
+   diag="MIXED"
+   def eq(a,b):
+    return pd.notna(a) and pd.notna(b) and np.isclose(a,b,rtol=rtol,atol=atol)
+   if eq(b2,b3) and not eq(b1,b2):diag="BATCH 1 MISMATCH"
+   elif eq(b1,b3) and not eq(b1,b2):diag="BATCH 2 MISMATCH"
+   elif eq(b1,b2) and not eq(b1,b3):diag="BATCH 3 MISMATCH"
+   rows.append({"Symbol":sym,"Field":field,"Batch 1":b1,"Batch 2":b2,"Batch 3":b3,
+                "Diagnosis":diag,"Severity":"BLOCKED" if field=="Price" else "REVIEW"})
+ return pd.DataFrame(rows)
+
+def systematic_conflict_diagnosis(details, symbol_count):
+ if details is None or details.empty:
+  return {"state":"PASS","message":"Tidak ada konflik nilai antar-batch."}
+ if symbol_count<=0:
+  return {"state":"REVIEW","message":"Konflik ditemukan."}
+ d=details
+ common_fields=d["Field"].nunique()
+ b1=(d["Diagnosis"]=="BATCH 1 MISMATCH").sum()
+ total=len(d)
+ # Strong systematic signature: almost all detailed conflicts point to the same batch.
+ if total>=symbol_count*3 and b1/total>=.90:
+  return {"state":"SCHEMA_ALIGNMENT_ERROR","suspected_batch":1,
+          "message":f"Pola konflik sistematis terdeteksi: {b1}/{total} konflik menunjuk Batch 1. Periksa pemetaan/urutan kolom Batch 1."}
+ return {"state":"VALUE_CONFLICT","message":f"{total} konflik nilai ditemukan. Periksa Conflict Details."}
+
+def missing_value_details(raw_ds, norm_ds):
+ """Expose source-level missing values with batch provenance for UI diagnostics."""
+ rows=[]
+ for i,(raw,normed) in enumerate(zip(raw_ds,norm_ds),1):
+  if normed.empty or "Symbol" not in normed: continue
+  raw_idx=raw.set_index("Symbol") if (not raw.empty and "Symbol" in raw) else pd.DataFrame()
+  for _,r in normed.iterrows():
+   sym=r["Symbol"]
+   for field in [c for c in normed.columns if c!="Symbol"]:
+    if pd.isna(r[field]):
+     rv=""
+     if not raw_idx.empty and sym in raw_idx.index and field in raw_idx.columns:
+      q=raw_idx.loc[sym,field]
+      if isinstance(q,pd.Series): q=q.iloc[0]
+      rv=str(q).strip()
+     rows.append({"Symbol":sym,"Field":field,"Source Batch":i,
+                  "Source Value":rv or "(empty)","Status":"SOURCE MISSING",
+                  "Reason":"Nilai sumber tidak tersedia; metric tidak diimputasi."})
+ return pd.DataFrame(rows)
+
 def eng(x):
  x=x.copy()
  def c(n):return x[n] if n in x else pd.Series(np.nan,index=x.index)
@@ -135,3 +229,70 @@ def eng(x):
   if z<b<a:return "DETERIORATING"
   return "MIXED"
  x["RS Trajectory"]=x.apply(rs,axis=1);return x
+
+def align_batches_with_evidence(parsed_ds, expected_schemas, rtol=.001, atol=.001):
+ """
+ Evidence-based schema alignment across batches.
+ Always returns one diagnostic slot per expected batch, including empty/malformed batches.
+ Fail closed when any batch is unreadable or schema-invalid.
+ """
+ n=len(expected_schemas)
+ diags=[]
+ for i in range(n):
+  d=parsed_ds[i] if i < len(parsed_ds) else pd.DataFrame()
+  expected=expected_schemas[i]
+  exp=[_clean_header(c) for c in expected]
+  got=[_clean_header(c) for c in d.columns]
+  state="PENDING"
+  if d.empty: state="NO_DATA"
+  elif len(got)!=len(exp) or set(got)!=set(exp): state="SCHEMA_MISMATCH"
+  diags.append({"batch":i+1,"header_order":got,"expected_order":exp,"permuted":bool(got and got!=exp),"interpretation":None,"realigned":False,"state":state})
+
+ if len(parsed_ds) != n:
+  copies=[parsed_ds[i].copy() if i < len(parsed_ds) else pd.DataFrame() for i in range(n)]
+  return copies,diags,{"blocked":True,"state":"SCHEMA_COUNT_MISMATCH","message":"Jumlah batch/schema tidak sesuai."}
+
+ invalid=[d for d in diags if d["state"] in {"NO_DATA","SCHEMA_MISMATCH"}]
+ if invalid:
+  first=invalid[0]
+  if first["state"]=="NO_DATA": msg=f"Batch {first['batch']} tidak terbaca."
+  else: msg=f"Schema Batch {first['batch']} tidak cocok; normalisasi otomatis tidak dilakukan."
+  return [d.copy() for d in parsed_ds],diags,{"blocked":True,"state":first["state"],"message":msg}
+
+ options=[]
+ for i,(d,expected) in enumerate(zip(parsed_ds,expected_schemas)):
+  exp=diags[i]["expected_order"]; got=diags[i]["header_order"]
+  semantic=d.copy(); semantic.columns=got
+  if got==exp:
+   options.append([("SEMANTIC",semantic)])
+  else:
+   positional=d.copy(); positional.columns=exp
+   options.append([("SEMANTIC",semantic),("POSITIONAL",positional)])
+
+ import itertools
+ common_core={"Volume","Volume MA 20","Price MA 20","Price MA 50","RSI (14)","ADTV 30","Price"}
+ def score(combo):
+  nd=[norm(item[1]) for item in combo]
+  details=conflict_details(nd,rtol=rtol,atol=atol)
+  if details.empty:return 0
+  return int(details[details["Field"].isin(common_core)].shape[0])
+ combos=list(itertools.product(*options))
+ scored=[(score(c),c) for c in combos]
+ best_score=min(s for s,_ in scored)
+ best=[c for s,c in scored if s==best_score]
+ if len(best)>1:
+  if any(d.get("permuted") for d in diags):
+   return [d.copy() for d in parsed_ds],diags,{"blocked":True,"state":"AMBIGUOUS_SCHEMA_ALIGNMENT","message":"Urutan kolom ambigu; SIS tidak melakukan realignment otomatis tanpa bukti lintas-batch yang cukup.","best_conflicts":best_score}
+  chosen=best[0]
+ else:
+  chosen=best[0]
+ all_sem=[next(x for x in opts if x[0]=="SEMANTIC") for opts in options]
+ baseline=score(tuple(all_sem))
+ positional_used=any(mode=="POSITIONAL" for mode,_ in chosen)
+ if positional_used and not (best_score < baseline and (baseline-best_score)>=max(3,int(.5*max(1,baseline)))):
+  return [d.copy() for d in parsed_ds],diags,{"blocked":True,"state":"LOW_CONFIDENCE_ALIGNMENT","message":"Ada indikasi pergeseran kolom, tetapi bukti tidak cukup kuat untuk koreksi otomatis.","baseline_conflicts":baseline,"best_conflicts":best_score}
+ aligned=[]
+ for diag,(mode,d) in zip(diags,chosen):
+  diag["interpretation"]=mode;diag["realigned"]=(mode=="POSITIONAL");diag["state"]="REALIGNED" if mode=="POSITIONAL" else "ALIGNED"
+  aligned.append(d)
+ return aligned,diags,{"blocked":False,"state":"PASS","message":"Schema alignment tervalidasi dengan bukti lintas-batch.","baseline_conflicts":baseline,"best_conflicts":best_score}
