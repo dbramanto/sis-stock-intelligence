@@ -50,6 +50,22 @@ class SnapshotHistoryTests(unittest.TestCase):
             created_at=created,
         )
 
+    def test_load_effective_round_trips_raw_batches_without_mutation(self):
+        raw, normalized, merged, validation = sample("RESTORE")
+        ref = self.store.save_daily_snapshot(
+            trading_date="2026-09-18",
+            raw_batches=raw,
+            normalized_batches=normalized,
+            merged_stage1=merged,
+            validation=validation,
+        )
+        before = (Path(self.tmp.name) / "2026-09-18" / "revision_001.json").read_bytes()
+        payload = self.store.load_effective(ref.trading_date)
+        after = (Path(self.tmp.name) / "2026-09-18" / "revision_001.json").read_bytes()
+        self.assertEqual(raw, payload["raw_batches"])
+        self.assertEqual(before, after)
+        self.assertEqual(1, len(self.store.list_daily()))
+
     def test_same_trading_day_same_data_is_idempotent(self):
         a = self.save(created=datetime(2026, 9, 18, 19, 0))
         b = self.save(created=datetime(2026, 9, 18, 23, 0))
