@@ -114,6 +114,15 @@ elif p=="History":
  st.subheader("02 · DAILY HISTORY")
  st.caption("Satu baris mewakili satu trading day. Revisi pada hari yang sama tidak membuat baris harian baru.")
  st.warning("History pada Streamlit bersifat sementara. Unduh backup secara berkala agar salinan tetap tersimpan di perangkat lokal.")
+ uploaded_backup=st.file_uploader("RESTORE HISTORY BACKUP (.ZIP)",type=["zip"],key="history_backup_zip")
+ if uploaded_backup is not None:
+  if st.button("VERIFY & RESTORE BACKUP",use_container_width=True):
+   try:
+    result=snapshot_store.restore_backup(uploaded_backup.getvalue())
+    st.success(f"Restore PASS — {result['restored_days']} trading day dipulihkan, {result['skipped_days']} sudah identik.")
+    st.rerun()
+   except (SnapshotError, ValueError, OSError) as exc:
+    st.error(f"Restore BLOCKED — {exc}")
  rows=snapshot_store.list_daily()
  if rows:
   newest=rows[0].get("trading_date","history")
