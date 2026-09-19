@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import tempfile
 import zipfile
@@ -31,13 +32,41 @@ class SnapshotRef:
 
 
 def _jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None:
+        return None
+    if isinstance(value, str):
         return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    # Normalize numpy/pandas scalar values before JSON encoding.
+    # Missing/non-finite evidence must remain missing (JSON null), never zero.
+    if hasattr(value, "item"):
+        try:
+            scalar = value.item()
+            if scalar is not value:
+                return _jsonable(scalar)
+        except (ValueError, TypeError):
+            pass
+
+    # pandas.NA / NaT and similar missing sentinels do not have a stable
+    # truth value, so detect them without importing pandas into this module.
+    try:
+        missing = value != value
+        if isinstance(missing, bool) and missing:
+            return None
+    except (TypeError, ValueError):
+        pass
+
     if hasattr(value, "to_dict"):
         try:
-            return value.to_dict(orient="records")
+            return _jsonable(value.to_dict(orient="records"))
         except TypeError:
-            return value.to_dict()
+            return _jsonable(value.to_dict())
     if isinstance(value, Mapping):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
