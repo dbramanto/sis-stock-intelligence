@@ -2,6 +2,9 @@ import io
 import json
 import tempfile
 import unittest
+
+import numpy as np
+import pandas as pd
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -90,6 +93,47 @@ class SnapshotHistoryTests(unittest.TestCase):
                 merged_stage1=merged,
                 validation=validation,
             )
+
+    def test_missing_and_nonfinite_values_serialize_as_json_null(self):
+        raw, normalized, merged, validation = sample()
+        normalized[0][0]["NaN"] = float("nan")
+        normalized[0][0]["PosInf"] = float("inf")
+        normalized[0][0]["NegInf"] = float("-inf")
+        normalized[0][0]["PandasNA"] = pd.NA
+        normalized[0][0]["NumpyNaN"] = np.float64("nan")
+        normalized[0][0]["NumpyInt"] = np.int64(7)
+        ref = self.store.save_daily_snapshot(
+            trading_date="2026-09-18",
+            raw_batches=raw,
+            normalized_batches=normalized,
+            merged_stage1=merged,
+            validation=validation,
+        )
+        payload = self.store.load_effective(ref.trading_date)
+        row = payload["normalized_batches"][0][0]
+        self.assertIsNone(row["NaN"])
+        self.assertIsNone(row["PosInf"])
+        self.assertIsNone(row["NegInf"])
+        self.assertIsNone(row["PandasNA"])
+        self.assertIsNone(row["NumpyNaN"])
+        self.assertEqual(7, row["NumpyInt"])
+
+    def test_dataframe_with_nan_can_be_snapshotted(self):
+        raw, normalized, _, validation = sample()
+        frame = pd.DataFrame([
+            {"Symbol": "AAA", "Price": 100.0, "Metric": np.nan},
+            {"Symbol": "BBB", "Price": 50.0, "Metric": pd.NA},
+        ])
+        ref = self.store.save_daily_snapshot(
+            trading_date="2026-09-18",
+            raw_batches=raw,
+            normalized_batches=normalized,
+            merged_stage1=frame,
+            validation=validation,
+        )
+        payload = self.store.load_effective(ref.trading_date)
+        self.assertIsNone(payload["merged_stage1"][0]["Metric"])
+        self.assertIsNone(payload["merged_stage1"][1]["Metric"])
 
     def test_tamper_detection(self):
         a = self.save()
