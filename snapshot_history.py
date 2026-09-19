@@ -60,8 +60,14 @@ def _jsonable(value: Any) -> Any:
 
     try:
         missing = value != value
-        if isinstance(missing, bool) and missing:
-            return None
+        # numpy.bool_ and similar scalar booleans are not isinstance(..., bool).
+        # Convert only scalar truth values; arrays/Series are deliberately ignored.
+        if not hasattr(missing, "__len__"):
+            try:
+                if bool(missing):
+                    return None
+            except (TypeError, ValueError):
+                pass
     except (TypeError, ValueError):
         pass
 
