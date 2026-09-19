@@ -1,13 +1,18 @@
 import streamlit as st, pandas as pd
 from sis_core import parse,norm,merge,eng,duplicate_symbols,dedupe_for_merge,batch_coverage,align_to_expected,conflict_details,systematic_conflict_diagnosis,missing_value_details,align_batches_with_evidence
 from stage2_adapter import run_stage2
+from snapshot_history import SnapshotStore, SnapshotError
+from pathlib import Path
 
 st.set_page_config(page_title="SIS MVP",layout="wide")
 st.title("SIS — Stock Intelligence System")
 st.caption("RC1.1.1 + STAGE 2 LOGIC FREEZE • data integrity • horizon screening • risk families")
 
 if "x" not in st.session_state:
- st.session_state.x=pd.DataFrame();st.session_state.raw=pd.DataFrame();st.session_state.conf=[];st.session_state.conf_detail=pd.DataFrame();st.session_state.null_detail=pd.DataFrame();st.session_state.schema_diag=[];st.session_state.coverage=pd.DataFrame();st.session_state.blocked=False;st.session_state.gate_state="PASS";st.session_state.stage2=None
+ st.session_state.x=pd.DataFrame();st.session_state.raw=pd.DataFrame();st.session_state.conf=[];st.session_state.conf_detail=pd.DataFrame();st.session_state.null_detail=pd.DataFrame();st.session_state.schema_diag=[];st.session_state.coverage=pd.DataFrame();st.session_state.blocked=False;st.session_state.gate_state="PASS";st.session_state.stage2=None;st.session_state.active_snapshot=None
+
+SNAPSHOT_ROOT=Path(".sis_history")
+snapshot_store=SnapshotStore(SNAPSHOT_ROOT)
 
 def display_table(df,height=None,numbered=False):
  d=df.copy()
@@ -33,9 +38,12 @@ def reset_processing_state():
  st.session_state.gate_state="BLOCKED"
  st.session_state.stage2=None
 
-p=st.sidebar.radio("Menu",["Import","Validation","Candidates","Stage 2","Stock Intelligence"])
+p=st.sidebar.radio("Menu",["Import","History","Validation","Candidates","Stage 2","Stock Intelligence"])
 
 if p=="Import":
+ st.subheader("01 · IMPORT DATA")
+ st.caption("Snapshot disimpan per trading day. Jam input hanya metadata audit.")
+ trading_date=st.date_input("Trading Date",help="Tanggal perdagangan yang direpresentasikan oleh B1–B3, bukan waktu Anda melakukan input.")
  tabs=st.tabs(["Batch 1 Technical/RS","Batch 2 Fundamental","Batch 3 Cash Flow"]);v=[]
  for i,a in enumerate(tabs):
   with a:v.append(st.text_area("Paste tabel Stockbit",height=280,key=str(i)))
@@ -93,7 +101,32 @@ if p=="Import":
     st.warning(diagnosis["message"])
     st.markdown("**Conflict Details — nilai aktual per batch**")
     display_table(detail,numbered=True)
+   validation_snapshot={"gate_state":st.session_state.gate_state,"symbols":len(x),"conflicts":len(detail),"partial_symbols":partial,"schema_realigned_batches":[d.get("batch") for d in schema_diag if d.get("realigned")]}
+   try:
+    snap=snapshot_store.save_daily_snapshot(trading_date=trading_date,raw_batches=v,normalized_batches=safe,merged_stage1=x,validation=validation_snapshot,source="MANUAL_STOCKBIT")
+    st.session_state.active_snapshot={"snapshot_id":snap.snapshot_id,"trading_date":snap.trading_date,"revision":snap.revision,"gate_state":snap.gate_state}
+    st.info(f"Snapshot aktif: {snap.snapshot_id} • Trading Day {snap.trading_date}")
+   except SnapshotError as exc:
+    st.warning(f"Snapshot tidak disimpan: {exc}")
    st.success(f"{len(raw)} saham berhasil diproses tanpa membuang partial candidate.")
+
+elif p=="History":
+ st.subheader("02 · DAILY HISTORY")
+ st.caption("Satu baris mewakili satu trading day. Revisi pada hari yang sama tidak membuat baris harian baru.")
+ rows=snapshot_store.list_daily()
+ if not rows:
+  st.info("Belum ada snapshot harian.")
+ else:
+  h=pd.DataFrame(rows)
+  cols=[c for c in ["trading_date","snapshot_id","revision","gate_state","status","source","created_at"] if c in h.columns]
+  display_table(h[cols],numbered=True)
+  dates=[r.get("trading_date") for r in rows if r.get("trading_date")]
+  chosen=st.selectbox("Lihat snapshot",dates,key="history_trading_date")
+  try:
+   payload=snapshot_store.load_effective(chosen)
+   st.write({"snapshot_id":payload.get("snapshot_id"),"trading_date":payload.get("trading_date"),"revision":payload.get("revision"),"gate_state":payload.get("validation",{}).get("gate_state"),"source":payload.get("source"),"created_at":payload.get("created_at")})
+  except SnapshotError as exc:
+   st.error(str(exc))
 
 elif p=="Validation":
  if st.session_state.x.empty:st.warning("Import dahulu.")
