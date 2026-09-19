@@ -115,6 +115,63 @@ class SnapshotHistoryTests(unittest.TestCase):
             self.assertEqual("SIS_DAILY_HISTORY_BACKUP", index["export_type"])
             self.assertEqual(2, len(index["daily_snapshots"]))
 
+    def test_restore_round_trip(self):
+        self.save(td="2026-09-18")
+        self.save(td="2026-09-19")
+        data = self.store.export_backup()
+        with tempfile.TemporaryDirectory() as other:
+            restored = SnapshotStore(other)
+            result = restored.restore_backup(data)
+            self.assertEqual({"restored_days": 2, "skipped_days": 0}, result)
+            self.assertEqual(2, len(restored.list_daily()))
+            self.assertEqual("2026-09-19", restored.list_daily()[0]["trading_date"])
+
+    def test_restore_identical_is_idempotent(self):
+        self.save(td="2026-09-18")
+        data = self.store.export_backup()
+        result = self.store.restore_backup(data)
+        self.assertEqual({"restored_days": 0, "skipped_days": 1}, result)
+        self.assertEqual(1, len(self.store.list_daily()))
+
+    def test_restore_tampered_revision_is_blocked(self):
+        self.save(td="2026-09-18")
+        data = self.store.export_backup()
+        source = zipfile.ZipFile(io.BytesIO(data), "r")
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in source.namelist():
+                raw = source.read(name)
+                if name.endswith("revision_001.json"):
+                    payload = json.loads(raw)
+                    payload["raw_batches"][0] = "TAMPERED"
+                    raw = json.dumps(payload).encode()
+                zf.writestr(name, raw)
+        source.close()
+        with tempfile.TemporaryDirectory() as other:
+            restored = SnapshotStore(other)
+            with self.assertRaises(SnapshotError):
+                restored.restore_backup(out.getvalue())
+            self.assertEqual([], restored.list_daily())
+
+    def test_restore_conflict_never_overwrites(self):
+        self.save(td="2026-09-18", tag="A")
+        data = self.store.export_backup()
+        with tempfile.TemporaryDirectory() as other:
+            restored = SnapshotStore(other)
+            raw, normalized, merged, validation = sample("B")
+            restored.save_daily_snapshot(
+                trading_date="2026-09-18",
+                raw_batches=raw,
+                normalized_batches=normalized,
+                merged_stage1=merged,
+                validation=validation,
+            )
+            before = restored.load_effective("2026-09-18")["content_hash"]
+            with self.assertRaises(SnapshotError):
+                restored.restore_backup(data)
+            after = restored.load_effective("2026-09-18")["content_hash"]
+            self.assertEqual(before, after)
+
     def test_days_are_independent_and_sorted_latest_first(self):
         self.save(td="2026-09-17")
         self.save(td="2026-09-19")
