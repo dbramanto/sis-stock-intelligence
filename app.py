@@ -38,16 +38,33 @@ def reset_processing_state():
  st.session_state.gate_state="BLOCKED"
  st.session_state.stage2=None
 
-p=st.sidebar.radio("Menu",["Import","History","Validation","Candidates","Stage 2","Stock Intelligence"])
+def queue_snapshot_reprocess(raw_batches, trading_date, snapshot_id):
+ if len(raw_batches)!=3:
+  raise SnapshotError("snapshot must contain exactly 3 raw batches")
+ for i,value in enumerate(raw_batches):
+  st.session_state[str(i)]=value
+ st.session_state.restore_trading_date=trading_date
+ st.session_state.restore_snapshot_id=snapshot_id
+ st.session_state.reprocess_snapshot=True
+ st.session_state.sis_menu="Import"
+
+p=st.sidebar.radio("Menu",["Import","History","Validation","Candidates","Stage 2","Stock Intelligence"],key="sis_menu")
 
 if p=="Import":
  st.subheader("01 · IMPORT DATA")
  st.caption("Snapshot disimpan per trading day. Jam input hanya metadata audit.")
- trading_date=st.date_input("Trading Date",help="Tanggal perdagangan yang direpresentasikan oleh B1–B3, bukan waktu Anda melakukan input.")
+ default_trading_date=st.session_state.pop("restore_trading_date",None)
+ trading_date=st.date_input("Trading Date",value=default_trading_date if default_trading_date else "today",help="Tanggal perdagangan yang direpresentasikan oleh B1–B3, bukan waktu Anda melakukan input.")
  tabs=st.tabs(["Batch 1 Technical/RS","Batch 2 Fundamental","Batch 3 Cash Flow"]);v=[]
  for i,a in enumerate(tabs):
   with a:v.append(st.text_area("Paste tabel Stockbit",height=280,key=str(i)))
- if st.button("PROCESS SIS",type="primary",use_container_width=True):
+ process_clicked=st.button("PROCESS SIS",type="primary",use_container_width=True)
+ reprocess_snapshot=bool(st.session_state.pop("reprocess_snapshot",False))
+ if process_clicked or reprocess_snapshot:
+  if reprocess_snapshot:
+   restored_id=st.session_state.pop("restore_snapshot_id",None)
+   if restored_id:
+    st.info(f"Memuat ulang {restored_id} dari raw evidence tersimpan dan menjalankan pipeline SIS.")
   reset_processing_state()
   parsed=[parse(q) for q in v]
   aligned,schema_diag,alignment_gate=align_batches_with_evidence(parsed,EXPECTED)
@@ -139,6 +156,15 @@ elif p=="History":
   try:
    payload=snapshot_store.load_effective(chosen)
    st.write({"snapshot_id":payload.get("snapshot_id"),"trading_date":payload.get("trading_date"),"revision":payload.get("revision"),"gate_state":payload.get("validation",{}).get("gate_state"),"source":payload.get("source"),"created_at":payload.get("created_at")})
+   st.button(
+    "LOAD SNAPSHOT & REPROCESS",
+    type="primary",
+    use_container_width=True,
+    on_click=queue_snapshot_reprocess,
+    args=(payload.get("raw_batches",[]),payload.get("trading_date"),payload.get("snapshot_id")),
+    help="Verifikasi snapshot, muat kembali RAW B1–B3, lalu jalankan ulang pipeline SIS dari Import.",
+   )
+   st.caption("Snapshot historis tetap immutable. SIS membangun ulang hasil dari RAW B1–B3, bukan mempercayai hasil turunan lama.")
   except SnapshotError as exc:
    st.error(str(exc))
 
