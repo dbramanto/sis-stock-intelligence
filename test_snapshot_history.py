@@ -134,6 +134,22 @@ class SnapshotHistoryTests(unittest.TestCase):
         self.assertIsNone(row["NumpyNaN"])
         self.assertEqual(7, row["NumpyInt"])
 
+    def test_numpy_object_scalars_and_nested_nonfinite_are_json_safe(self):
+        raw, normalized, merged, validation = sample()
+        normalized[0][0]["NumpyFloatNaN"] = np.float32("nan")
+        normalized[0][0]["Nested"] = {"values": [np.float32("nan"), np.float64("inf"), np.int64(9)]}
+        ref = self.store.save_daily_snapshot(
+            trading_date="2026-09-18",
+            raw_batches=raw,
+            normalized_batches=normalized,
+            merged_stage1=merged,
+            validation=validation,
+        )
+        payload = self.store.load_effective(ref.trading_date)
+        row = payload["normalized_batches"][0][0]
+        self.assertIsNone(row["NumpyFloatNaN"])
+        self.assertEqual([None, None, 9], row["Nested"]["values"])
+
     def test_dataframe_with_nan_can_be_snapshotted(self):
         raw, normalized, _, validation = sample()
         frame = pd.DataFrame([
