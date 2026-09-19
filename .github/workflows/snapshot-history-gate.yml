@@ -29,7 +29,7 @@ jobs:
           python - <<'PY'
           import app_schema
           import sis_core
-          import stage2_engine
+          import sis_stage2
           import stage2_adapter
           assert len(app_schema.EXPECTED) == 3
           print("PASS - existing SIS modules import cleanly")
