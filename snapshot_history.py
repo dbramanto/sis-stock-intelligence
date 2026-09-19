@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
+import zipfile
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -209,6 +211,24 @@ class SnapshotStore:
             except Exception:
                 rows.append({"trading_date": day.name, "status": "CORRUPT"})
         return rows
+
+    def export_backup(self) -> bytes:
+        """Export the complete temporary history as a portable ZIP backup."""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            files = sorted(p for p in self.root.rglob("*") if p.is_file())
+            for path in files:
+                zf.write(path, path.relative_to(self.root).as_posix())
+            index = {
+                "schema_version": SNAPSHOT_SCHEMA_VERSION,
+                "export_type": "SIS_DAILY_HISTORY_BACKUP",
+                "daily_snapshots": self.list_daily(),
+            }
+            zf.writestr(
+                "BACKUP_INDEX.json",
+                json.dumps(index, ensure_ascii=False, sort_keys=True, indent=2),
+            )
+        return buffer.getvalue()
 
     def load_effective(self, trading_date: str | date | datetime) -> dict[str, Any]:
         td = _normalize_trading_date(trading_date)
