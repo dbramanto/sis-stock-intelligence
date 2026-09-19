@@ -1,36 +1,48 @@
-name: Snapshot History Release Gate
+name: Audit Release Gate v2
 
 on:
   pull_request:
     branches: [ main ]
-  push:
-    branches: [ feature/snapshot-history-v1 ]
 
 jobs:
-  release-gate:
+  release-gate-v2:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.14']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install dependencies
+          python-version: ${{ matrix.python-version }}
+      - name: G1 Install and dependency pre-flight
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Dependency check
-        run: python -m pip check
-      - name: Compile
+          python -m pip check
+      - name: G2 Static and compile
         run: python -m compileall -q -f -x '(__pycache__|BACKUP|\.git)' .
-      - name: Snapshot unit and adversarial tests
+      - name: G3 Unit regression adversarial
         run: python -m unittest -v test_snapshot_history.py
-      - name: Existing SIS regression smoke
+      - name: G4-G6 Contract boundary and real-shape replay
+        run: python -m unittest -v test_real_shape_replay.py
+      - name: G7 Existing SIS regression
         run: |
           python - <<'PY'
-          import app_schema
-          import sis_core
-          import sis_stage2
-          import stage2_adapter
+          import app_schema, sis_core, sis_stage2, stage2_adapter
           assert len(app_schema.EXPECTED) == 3
-          print("PASS - existing SIS modules import cleanly")
+          print("PASS - SIS modules and contracts import cleanly")
+          PY
+      - name: G14 Test adequacy evidence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          required=["test_snapshot_history.py","test_real_shape_replay.py"]
+          missing=[p for p in required if not Path(p).is_file()]
+          assert not missing, f"Missing required evidence: {missing}"
+          text=Path("test_real_shape_replay.py").read_text()
+          for token in ["eng(", "save_daily_snapshot(", "load_effective(", "np.float32", "pd.NA"]:
+              assert token in text, f"Real-shape evidence missing token: {token}"
+          print("PASS - required boundary/real-shape evidence present")
           PY
