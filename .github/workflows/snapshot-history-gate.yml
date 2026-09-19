@@ -1,0 +1,36 @@
+name: Snapshot History Release Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ feature/snapshot-history-v1 ]
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Dependency check
+        run: python -m pip check
+      - name: Compile
+        run: python -m compileall -q -f -x '(__pycache__|BACKUP|\.git)' .
+      - name: Snapshot unit and adversarial tests
+        run: python -m unittest -v test_snapshot_history.py
+      - name: Existing SIS regression smoke
+        run: |
+          python - <<'PY'
+          import app_schema
+          import sis_core
+          import sis_stage2
+          import stage2_adapter
+          assert len(app_schema.EXPECTED) == 3
+          print("PASS - existing SIS modules import cleanly")
+          PY
