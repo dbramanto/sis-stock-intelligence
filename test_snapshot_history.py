@@ -1,6 +1,8 @@
+import io
 import json
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -97,6 +99,21 @@ class SnapshotHistoryTests(unittest.TestCase):
         p.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaises(SnapshotError):
             self.store.load_effective(a.trading_date)
+
+    def test_export_backup_contains_history_and_index(self):
+        self.save(td="2026-09-18")
+        self.save(td="2026-09-19")
+        data = self.store.export_backup()
+        self.assertTrue(data.startswith(b"PK"))
+        with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+            names = set(zf.namelist())
+            self.assertIn("BACKUP_INDEX.json", names)
+            self.assertIn("2026-09-18/manifest.json", names)
+            self.assertIn("2026-09-18/revision_001.json", names)
+            self.assertIn("2026-09-19/manifest.json", names)
+            index = json.loads(zf.read("BACKUP_INDEX.json"))
+            self.assertEqual("SIS_DAILY_HISTORY_BACKUP", index["export_type"])
+            self.assertEqual(2, len(index["daily_snapshots"]))
 
     def test_days_are_independent_and_sorted_latest_first(self):
         self.save(td="2026-09-17")
