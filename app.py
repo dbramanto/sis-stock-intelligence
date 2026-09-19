@@ -113,7 +113,12 @@ if p=="Import":
 elif p=="History":
  st.subheader("02 · DAILY HISTORY")
  st.caption("Satu baris mewakili satu trading day. Revisi pada hari yang sama tidak membuat baris harian baru.")
+ st.warning("History pada Streamlit bersifat sementara. Unduh backup secara berkala agar salinan tetap tersimpan di perangkat lokal.")
  rows=snapshot_store.list_daily()
+ if rows:
+  newest=rows[0].get("trading_date","history")
+  backup=snapshot_store.export_backup()
+  st.download_button("DOWNLOAD ALL HISTORY (.ZIP)",data=backup,file_name=f"SIS_HISTORY_BACKUP_{newest}.zip",mime="application/zip",use_container_width=True)
  if not rows:
   st.info("Belum ada snapshot harian.")
  else:
