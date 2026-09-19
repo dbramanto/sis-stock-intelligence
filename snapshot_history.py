@@ -53,8 +53,11 @@ def _jsonable(value: Any) -> Any:
         except (ValueError, TypeError):
             pass
 
-    # pandas.NA / NaT and similar missing sentinels do not have a stable
-    # truth value, so detect them without importing pandas into this module.
+    # pandas.NA / NaT do not have a stable truth value.
+    cls = value.__class__
+    if cls.__module__.startswith("pandas") and cls.__name__ in {"NAType", "NaTType"}:
+        return None
+
     try:
         missing = value != value
         if isinstance(missing, bool) and missing:
