@@ -9,3 +9,5 @@ venv/
 BACKUP_RC1_1_1/
 __pycache__/
 *.pyc
+# Runtime-only SIS snapshot history; never commit user data
+.sis_history/
