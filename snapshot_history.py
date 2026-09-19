@@ -230,6 +230,141 @@ class SnapshotStore:
             )
         return buffer.getvalue()
 
+    def restore_backup(self, data: bytes) -> dict[str, int]:
+        """Verify and restore a SIS history ZIP without overwriting conflicting history."""
+        if not data:
+            raise SnapshotError("backup file is empty")
+
+        restored_days = 0
+        skipped_days = 0
+        with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+            names = zf.namelist()
+            if "BACKUP_INDEX.json" not in names:
+                raise SnapshotError("invalid backup: BACKUP_INDEX.json missing")
+            if any(
+                name.startswith("/") or ".." in Path(name).parts
+                for name in names
+            ):
+                raise SnapshotError("invalid backup path")
+
+            try:
+                index = json.loads(zf.read("BACKUP_INDEX.json"))
+            except Exception as exc:
+                raise SnapshotError("invalid backup index") from exc
+            if (
+                index.get("export_type") != "SIS_DAILY_HISTORY_BACKUP"
+                or index.get("schema_version") != SNAPSHOT_SCHEMA_VERSION
+            ):
+                raise SnapshotError("unsupported SIS history backup")
+
+            day_names = sorted(
+                {
+                    parts[0]
+                    for name in names
+                    if name != "BACKUP_INDEX.json"
+                    for parts in [Path(name).parts]
+                    if len(parts) == 2 and parts[1] == "manifest.json"
+                }
+            )
+            staged: dict[str, dict[str, bytes]] = {}
+            for td in day_names:
+                _normalize_trading_date(td)
+                manifest_name = f"{td}/manifest.json"
+                try:
+                    manifest = json.loads(zf.read(manifest_name))
+                except Exception as exc:
+                    raise SnapshotError(f"invalid manifest for {td}") from exc
+                if (
+                    manifest.get("trading_date") != td
+                    or not isinstance(manifest.get("revisions"), list)
+                    or not manifest.get("effective_revision")
+                ):
+                    raise SnapshotError(f"corrupt manifest for {td}")
+
+                files = {manifest_name: zf.read(manifest_name)}
+                revisions = manifest["revisions"]
+                seen_revs = set()
+                effective_count = 0
+                for item in revisions:
+                    rev = item.get("revision")
+                    if not isinstance(rev, int) or rev < 1 or rev in seen_revs:
+                        raise SnapshotError(f"invalid revision manifest for {td}")
+                    seen_revs.add(rev)
+                    if item.get("status") == "EFFECTIVE":
+                        effective_count += 1
+                    rev_name = f"{td}/revision_{rev:03d}.json"
+                    if rev_name not in names:
+                        raise SnapshotError(f"missing revision file for {td} R{rev}")
+                    try:
+                        payload = json.loads(zf.read(rev_name))
+                    except Exception as exc:
+                        raise SnapshotError(f"invalid revision file for {td} R{rev}") from exc
+                    expected = payload.get("content_hash")
+                    check = {
+                        k: payload[k]
+                        for k in (
+                            "schema_version",
+                            "trading_date",
+                            "source",
+                            "raw_batches",
+                            "normalized_batches",
+                            "merged_stage1",
+                            "validation",
+                        )
+                    }
+                    if (
+                        payload.get("trading_date") != td
+                        or payload.get("revision") != rev
+                        or payload.get("snapshot_id") != item.get("snapshot_id")
+                        or expected != item.get("content_hash")
+                        or _hash_payload(check) != expected
+                    ):
+                        raise SnapshotError(f"snapshot integrity mismatch for {td} R{rev}")
+                    files[rev_name] = zf.read(rev_name)
+
+                if effective_count != 1:
+                    raise SnapshotError(f"invalid effective revision state for {td}")
+                effective = manifest["effective_revision"]
+                if effective not in seen_revs:
+                    raise SnapshotError(f"effective revision missing for {td}")
+                staged[td] = files
+
+            for td, files in staged.items():
+                target_manifest = self._manifest_path(td)
+                if target_manifest.exists():
+                    current = self._load_manifest(td)
+                    incoming = json.loads(files[f"{td}/manifest.json"])
+                    current_hashes = {
+                        x.get("content_hash") for x in current.get("revisions", [])
+                    }
+                    incoming_hashes = {
+                        x.get("content_hash") for x in incoming.get("revisions", [])
+                    }
+                    if current_hashes == incoming_hashes:
+                        skipped_days += 1
+                        continue
+                    raise SnapshotError(
+                        f"restore conflict for {td}; existing history was not overwritten"
+                    )
+
+                day_dir = self._day_dir(td)
+                day_dir.mkdir(parents=True, exist_ok=False)
+                try:
+                    for name, raw in files.items():
+                        target = self.root / name
+                        target.write_bytes(raw)
+                    # Re-read through normal integrity path before accepting restore.
+                    self.load_effective(td)
+                except Exception:
+                    for p in sorted(day_dir.glob("*"), reverse=True):
+                        if p.is_file():
+                            p.unlink()
+                    day_dir.rmdir()
+                    raise
+                restored_days += 1
+
+        return {"restored_days": restored_days, "skipped_days": skipped_days}
+
     def load_effective(self, trading_date: str | date | datetime) -> dict[str, Any]:
         td = _normalize_trading_date(trading_date)
         m = self._load_manifest(td)
