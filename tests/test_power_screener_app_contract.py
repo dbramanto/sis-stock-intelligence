@@ -91,5 +91,15 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn('"INSUFFICIENT_DATA": "TUNGGU DATA"', self.src)
 
 
+    def test_longterm_business_quality_uses_business_domain(self):
+        self.assertIn('get("dossier"', self.src)
+        self.assertIn('get("domains"', self.src)
+        self.assertIn('get("business"', self.src)
+
+    def test_longterm_primary_copy_is_not_price_centric(self):
+        self.assertNotIn('harga saat ini sebagai waktu beli yang ideal', self.src)
+        self.assertNotIn('konteks valuasi masih mendukung untuk dipertimbangkan pada harga saat ini', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()

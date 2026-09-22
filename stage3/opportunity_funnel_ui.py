@@ -43,9 +43,9 @@ def _plain_reason(action):
         "TUNGGU HARGA": "Saham masih menarik, tetapi harga belum berada di area beli yang ideal.",
         "TUNGGU KONFIRMASI": "Harga bisa menarik, tetapi sinyal teknikal belum cukup kuat untuk entry.",
         "JANGAN BELI DULU": "Kondisi saat ini belum memenuhi syarat SIS untuk membuka posisi Swing.",
-        "LAYAK DIBELI": "Prospek jangka panjang dan konteks valuasi masih mendukung untuk dipertimbangkan pada harga saat ini.",
+        "LAYAK DIBELI": "Prospek jangka panjang dan konteks akumulasi masih mendukung untuk dipertimbangkan.",
         "BAGUS, TUNGGU HARGA": "Prospek dapat tetap baik, tetapi harga saat ini belum cukup menarik. Tunggu harga yang lebih baik.",
-        "PERTIMBANGKAN / TUNGGU": "Kandidat masih layak diperhatikan, tetapi bukti yang ada belum cukup kuat untuk menyebut harga saat ini sebagai waktu beli yang ideal.",
+        "PERTIMBANGKAN / TUNGGU": "Kandidat masih layak diperhatikan, tetapi konteks akumulasi dan risiko belum cukup kuat untuk meningkatkan keputusan menjadi Layak Dibeli.",
         "BELUM LAYAK": "Kombinasi prospek, valuasi, atau risiko saat ini belum memenuhi syarat SIS untuk pembelian jangka panjang.",
     }.get(action, "Buka analisis lengkap untuk melihat dasar penilaian SIS.")
 
