@@ -37,5 +37,17 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertIn('Tingkat keyakinan', self.src)
 
 
+    def test_detail_swing_wait_labels_match_funnel(self):
+        self.assertIn('action = "TUNGGU HARGA"', self.src)
+        self.assertIn('action = "TUNGGU KONFIRMASI"', self.src)
+        self.assertNotIn('"WAIT": "TUNGGU"', self.src)
+
+    def test_user_facing_terms_are_consistent(self):
+        self.assertIn('Kualitas analisis menunjukkan kekuatan kandidat', self.src)
+        self.assertIn('Tingkat keyakinan menunjukkan seberapa yakin SIS', self.src)
+        self.assertNotIn('Quality menunjukkan kekuatan kandidat', self.src)
+        self.assertNotIn('Confidence menunjukkan tingkat keyakinan SIS', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
