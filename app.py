@@ -317,6 +317,11 @@ def render_final_results(result, packages):
             sym = row.get("symbol")
             if sym not in labels:
                 options.append(sym); labels[sym] = f"{sym} — {_human_state(row.get('execution_status'))}"
+        for candidate in candidates:
+            sym = candidate.get("symbol")
+            if sym and sym not in labels:
+                options.append(sym)
+                labels[sym] = f"{sym} — Semua saham lain tetap dapat dibuka"
         if options:
             selected = st.selectbox("Pilih saham untuk melihat analisis Swing", options, format_func=lambda x: labels.get(x, x), key="final_swing_symbol")
             cand = _candidate_for(stage3, selected)
@@ -329,9 +334,15 @@ def render_final_results(result, packages):
         top = long_term.get("top") or []
         if not top:
             st.info("Belum ada kandidat Long-Term yang memenuhi kriteria ranking pada snapshot ini.")
-        else:
-            labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Quality {row.get('quality')} | Confidence {row.get('confidence')}" for row in top}
-            selected = st.selectbox("Pilih saham untuk melihat analisis Long-Term", [row.get("symbol") for row in top], format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
+        labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Quality {row.get('quality')} | Confidence {row.get('confidence')}" for row in top}
+        lt_options = [row.get("symbol") for row in top if row.get("symbol")]
+        for candidate in candidates:
+            sym = candidate.get("symbol")
+            if sym and sym not in labels:
+                lt_options.append(sym)
+                labels[sym] = f"{sym} — Lihat analisis lengkap"
+        if lt_options:
+            selected = st.selectbox("Pilih saham untuk melihat analisis Long-Term", lt_options, format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
             cand = _candidate_for(stage3, selected)
             st.subheader(f"{selected} — Analisis Long-Term", anchor=False)
             _render_longterm_detail(cand, _package_for(packages, selected))
