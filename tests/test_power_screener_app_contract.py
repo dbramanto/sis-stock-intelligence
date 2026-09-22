@@ -29,5 +29,13 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn("power_score", self.src)
 
 
+    def test_detail_view_is_decision_first(self):
+        self.assertIn('st.markdown("**Saran SIS**")', self.src)
+        self.assertIn('st.markdown("**Rencana harga**")', self.src)
+        self.assertIn('with st.expander("Lihat detail analisis", expanded=False):', self.src)
+        self.assertIn('Kualitas analisis', self.src)
+        self.assertIn('Tingkat keyakinan', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()

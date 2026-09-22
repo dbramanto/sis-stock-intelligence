@@ -218,19 +218,23 @@ def _render_swing_detail(candidate, package):
     syn = (candidate or {}).get("synthesis") or {}
     sw = syn.get("swing") or {}
     ex = (candidate or {}).get("swing_execution") or {}
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Quality", sw.get("quality", "—"))
-    c2.metric("Confidence", sw.get("confidence", "—"))
-    c3.metric("Status", _human_state(ex.get("execution_status")))
-    _render_thesis_block(package, "swing")
+    status = ex.get("execution_status")
+    action = {
+        "READY": "SIAP BELI JIKA HARGA SESUAI",
+        "WAIT": "TUNGGU",
+        "NOT_ATTRACTIVE": "JANGAN BELI DULU",
+        "INSUFFICIENT_DATA": "TUNGGU DATA",
+    }.get(status, _human_state(status))
+    st.markdown("**Saran SIS**")
+    st.write(f"**{action}**")
     reasons = ex.get("reason_codes") or []
     if reasons:
-        st.markdown("**Mengapa belum siap dieksekusi**" if ex.get("execution_status") != "READY" else "**Konfirmasi eksekusi**")
+        st.markdown("**Kenapa**")
         for code in reasons:
             st.write(f"• {_reason_text(code)}")
     entry = ex.get("entry_area") or {}
+    st.markdown("**Rencana harga**")
     if entry:
-        st.markdown("**Rencana harga berdasarkan data yang tersedia**")
         st.write(f"Area entry: {_fmt_price(entry.get('low'))} – {_fmt_price(entry.get('high'))}")
         st.write(f"Target 1: {_fmt_price(ex.get('target_1'))} | Target 2: {_fmt_price(ex.get('target_2'))}")
         st.write(f"Batas risiko: {_fmt_price(ex.get('risk_boundary'))}")
@@ -238,37 +242,46 @@ def _render_swing_detail(candidate, package):
         st.caption(f"Rasio Imbal Hasil/Risiko — Target 1: {rr.get('target_1', '—')} | Target 2: {rr.get('target_2', '—')}")
     else:
         st.info("Data saat ini belum cukup untuk menentukan area entry dan batas risiko yang andal.")
+    with st.expander("Lihat detail analisis", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Kualitas analisis", sw.get("quality", "—"))
+        c2.metric("Tingkat keyakinan", sw.get("confidence", "—"))
+        c3.metric("Status teknis", _human_state(status))
+        _render_thesis_block(package, "swing")
 
 
 def _render_longterm_detail(candidate, package):
     syn = (candidate or {}).get("synthesis") or {}
     base = syn.get("long_term") or {}
     lt = (candidate or {}).get("longterm_outlook") or {}
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Quality", base.get("quality", "—"))
-    c2.metric("Confidence", base.get("confidence", "—"))
-    c3.metric("Konteks DCA", _human_state(lt.get("dca_context")))
     risk = ((syn.get("shared") or {}).get("risk_families") or {}).get("RISK", {}).get("state")
-    c4.metric("Risiko", _human_state(risk))
+    st.markdown("**Saran SIS**")
+    st.write(f"**Konteks DCA: {_human_state(lt.get('dca_context'))}**")
     out = lt.get("outlook") or {}
+    st.markdown("**Prospek**")
     cols = st.columns(3)
     for col, horizon, label in zip(cols, ("1Y", "3Y", "5Y"), ("1 Tahun", "3 Tahun", "5 Tahun")):
         x = out.get(horizon) or {}
-        col.metric(f"Outlook {label}", _human_state(x.get("state")), f"Keyakinan {x.get('confidence', '—')}")
-    _render_thesis_block(package, "long_term")
+        col.metric(f"Prospek {label}", _human_state(x.get("state")), f"Keyakinan {x.get('confidence', '—')}")
     drivers = lt.get("forward_drivers") or []
     risks = lt.get("forward_risks") or []
     if drivers:
-        st.markdown("**Faktor pendukung ke depan**")
+        st.markdown("**Faktor pendukung**")
         for code in drivers:
             st.write(f"• {_reason_text(code)}")
     if risks:
-        st.markdown("**Faktor yang perlu diperhatikan ke depan**")
+        st.markdown("**Risiko utama**")
         for code in risks:
             st.write(f"• {_reason_text(code)}")
-    fwd = lt.get("forward_evidence") or {}
-    if fwd:
-        with st.expander("Lihat data pendukung prospek", expanded=False):
+    with st.expander("Lihat detail analisis", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Kualitas analisis", base.get("quality", "—"))
+        c2.metric("Tingkat keyakinan", base.get("confidence", "—"))
+        c3.metric("Risiko", _human_state(risk))
+        _render_thesis_block(package, "long_term")
+        fwd = lt.get("forward_evidence") or {}
+        if fwd:
+            st.markdown("**Data pendukung prospek**")
             consistency_labels = {"BROAD_IMPROVEMENT": "Membaik secara luas", "Broad Improvement": "Membaik secara luas"}
             raw_consistency = fwd.get("consistency")
             st.write(f"Konsistensi proyeksi: {consistency_labels.get(str(raw_consistency), _human_state(raw_consistency))}")
@@ -334,7 +347,7 @@ def render_final_results(result, packages):
         top = long_term.get("top") or []
         if not top:
             st.info("Belum ada kandidat Long-Term yang memenuhi kriteria ranking pada snapshot ini.")
-        labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Quality {row.get('quality')} | Confidence {row.get('confidence')}" for row in top}
+        labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Analisis jangka panjang" for row in top}
         lt_options = [row.get("symbol") for row in top if row.get("symbol")]
         for candidate in candidates:
             sym = candidate.get("symbol")
