@@ -244,7 +244,7 @@ def _render_swing_detail(candidate, package):
     entry = ex.get("entry_area") or {}
     st.markdown("**Rencana harga**")
     if entry:
-        st.write(f"Area entry: {_fmt_price(entry.get('low'))} – {_fmt_price(entry.get('high'))}")
+        st.write(f"Area beli: {_fmt_price(entry.get('low'))} – {_fmt_price(entry.get('high'))}")
         st.write(f"Target 1: {_fmt_price(ex.get('target_1'))} | Target 2: {_fmt_price(ex.get('target_2'))}")
         st.write(f"Batas risiko: {_fmt_price(ex.get('risk_boundary'))}")
         rr = ex.get("reward_risk") or {}
@@ -358,7 +358,7 @@ def render_final_results(result, packages):
     st.divider()
     st.markdown("### Analisis Lengkap per Saham")
 
-    swing_tab, lt_tab = st.tabs(["Swing", "Long-Term"])
+    swing_tab, lt_tab = st.tabs(["Swing", "Jangka Panjang"])
     with swing_tab:
         top = swing.get("top") or []
         watch = swing.get("watch") or []
@@ -389,7 +389,7 @@ def render_final_results(result, packages):
     with lt_tab:
         top = long_term.get("top") or []
         if not top:
-            st.info("Belum ada kandidat Long-Term yang memenuhi kriteria ranking pada snapshot ini.")
+            st.info("Belum ada kandidat Jangka Panjang yang memenuhi kriteria ranking pada snapshot ini.")
         labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Analisis jangka panjang" for row in top}
         lt_options = [row.get("symbol") for row in top if row.get("symbol")]
         for candidate in candidates:
@@ -398,9 +398,9 @@ def render_final_results(result, packages):
                 lt_options.append(sym)
                 labels[sym] = f"{sym} — Lihat analisis lengkap"
         if lt_options:
-            selected = st.selectbox("Pilih saham untuk melihat analisis Long-Term", lt_options, format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
+            selected = st.selectbox("Pilih saham untuk melihat analisis Jangka Panjang", lt_options, format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
             cand = _candidate_for(stage3, selected)
-            st.subheader(f"{selected} — Analisis Long-Term", anchor=False)
+            st.subheader(f"{selected} — Analisis Jangka Panjang", anchor=False)
             _render_longterm_detail(cand, _package_for(packages, selected))
 
     st.caption("Kualitas analisis menunjukkan kekuatan kandidat berdasarkan data pendukung. Tingkat keyakinan menunjukkan seberapa yakin SIS terhadap penilaian tersebut. Keduanya dinilai terpisah dan tidak digabungkan menjadi satu nilai akhir.")
@@ -485,7 +485,7 @@ if run_clicked:
                 st.session_state["analysis_blocked"] = [friendly_stage1_issue(x) for x in s1.get("issues", [])]
             else:
                 st.write("Menyiapkan data untuk analisis…")
-                st.write("Menganalisis kandidat Swing dan Long-Term…")
+                st.write("Menganalisis kandidat Swing dan Jangka Panjang…")
                 s2 = run_stage2(s1["canonical"])
                 if s2.status != "PASS":
                     status.update(label="Analisis belum dapat diselesaikan", state="error")
