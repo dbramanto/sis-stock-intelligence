@@ -36,9 +36,9 @@ def _action_icon(action):
 
 def _plain_reason(action):
     return {
-        "SIAP BELI JIKA HARGA SESUAI": "Syarat entry SIS sudah terpenuhi. Gunakan area beli dan batas risiko yang ditampilkan; jangan mengejar harga di luar area.",
-        "TUNGGU HARGA": "Saham masih menarik, tetapi harga perlu kembali ke area yang lebih baik sebelum dipertimbangkan untuk entry.",
-        "TUNGGU KONFIRMASI": "Belum ada konfirmasi yang cukup untuk entry. Tunggu sampai syarat teknikal SIS terpenuhi.",
+        "SIAP BELI JIKA HARGA SESUAI": "Syarat entry sudah terpenuhi. Gunakan area beli dan batas risiko yang ditampilkan.",
+        "TUNGGU HARGA": "Saham masih menarik, tetapi harga belum berada di area beli yang ideal.",
+        "TUNGGU KONFIRMASI": "Harga bisa menarik, tetapi sinyal teknikal belum cukup kuat untuk entry.",
         "JANGAN BELI DULU": "Kondisi saat ini belum memenuhi syarat SIS untuk membuka posisi Swing.",
         "LAYAK DIBELI": "Prospek jangka panjang dan konteks valuasi masih mendukung untuk dipertimbangkan pada harga saat ini.",
         "BAGUS, TUNGGU HARGA": "Prospek dapat tetap baik, tetapi harga saat ini belum cukup menarik. Tunggu harga yang lebih baik.",
@@ -103,6 +103,7 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
     swing_tab, long_tab = st.tabs(["Swing", "Jangka Panjang"])
 
     with swing_tab:
+        st.caption("Apa artinya untuk besok? Jika belum ada saham berstatus “Siap Beli”, jangan memaksakan entry. Pantau saham berstatus “Tunggu Harga” dan “Tunggu Konfirmasi”.")
         top = funnel["swing"]["top3"]
         if top:
             cols = st.columns(len(top))
@@ -112,7 +113,7 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
                     if on_symbol and st.button(row.get("symbol"), key=f"funnel_swing_{row.get('symbol')}", help="Klik kode saham untuk melihat analisis lengkap", use_container_width=True):
                         on_symbol(row.get("symbol"), "swing")
         else:
-            st.info("Belum ada saham yang memenuhi seluruh syarat SIS untuk masuk Top 3 Swing pada snapshot ini.")
+            st.info("Belum ada peluang Swing yang siap dieksekusi. SIS menyarankan menunggu sampai ada saham yang memenuhi syarat entry. Seluruh saham tetap dapat dilihat di bagian “Lihat semua saham”.")
         with st.expander("Lihat semua saham", expanded=False):
             _render_all(st, funnel["swing"]["all"], "swing", on_symbol)
 
