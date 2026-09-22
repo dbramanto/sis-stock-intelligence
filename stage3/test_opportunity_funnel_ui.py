@@ -7,7 +7,7 @@ def test_price_format_is_indonesian_user_friendly():
 
 
 def test_entry_text_uses_existing_engine_range_only():
-    assert _entry_text({"entry_area": {"low": 3100, "high": 3170}}) == "Rp3.100 – Rp3.170"
+    assert _entry_text({"entry_area": {"low": 3100, "high": 3170}}) == "3.100 – 3.170"
     assert _entry_text({"entry_area": None}) == "Belum tersedia"
 
 
