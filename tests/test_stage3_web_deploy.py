@@ -25,7 +25,7 @@ class TestFinalWebDeploy(unittest.TestCase):
         self.assertIn('Hasil Analisis SIS', SRC)
     def test_drilldown_available(self):
         self.assertIn('Pilih saham untuk melihat analisis Swing', SRC)
-        self.assertIn('Pilih saham untuk melihat analisis Long-Term', SRC)
+        self.assertIn('Pilih saham untuk melihat analisis Jangka Panjang', SRC)
         self.assertIn('_render_thesis_block', SRC)
         self.assertIn('_candidate_for', SRC)
     def test_stage3_result_cleared_on_new_run(self):

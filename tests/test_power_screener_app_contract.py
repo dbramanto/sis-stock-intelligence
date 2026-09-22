@@ -63,5 +63,17 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn('return f"Rp', self.src)
 
 
+    def test_user_facing_horizon_terms_are_consistent(self):
+        self.assertIn('st.tabs(["Swing", "Jangka Panjang"])', self.src)
+        self.assertIn('Pilih saham untuk melihat analisis Jangka Panjang', self.src)
+        self.assertIn('Analisis Jangka Panjang', self.src)
+        self.assertNotIn('Pilih saham untuk melihat analisis Long-Term', self.src)
+        self.assertNotIn('Analisis Long-Term', self.src)
+
+    def test_user_facing_price_and_execution_terms_are_consistent(self):
+        self.assertIn('Area beli:', self.src)
+        self.assertNotIn('Area entry:', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
