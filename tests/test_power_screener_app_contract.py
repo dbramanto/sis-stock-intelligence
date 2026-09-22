@@ -80,5 +80,17 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertIn('Pilih riwayat data', self.src)
 
 
+    def test_longterm_summary_first_contract(self):
+        self.assertIn('Prospek jangka panjang', self.src)
+        self.assertIn('Kualitas bisnis', self.src)
+        self.assertIn('Konteks akumulasi', self.src)
+        self.assertIn('Apa yang menahan keputusan?', self.src)
+        self.assertNotIn('st.markdown("**Penilaian harga**")', self.src)
+
+    def test_swing_insufficient_data_uses_frozen_action_contract(self):
+        self.assertIn('"INSUFFICIENT_DATA": "JANGAN BELI DULU"', self.src)
+        self.assertNotIn('"INSUFFICIENT_DATA": "TUNGGU DATA"', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
