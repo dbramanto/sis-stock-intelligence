@@ -14,6 +14,7 @@ for _p in (_APP_ROOT / "integration_pipeline", _APP_ROOT / "stage3"):
         sys.path.insert(0, str(_p))
 from integration_pipeline.pipeline_p10_orchestrator import run_pipeline
 from stage3.stage3_e2e_runner import run_stage3_universe
+from stage3.opportunity_funnel_ui import render_opportunity_funnel
 
 st.set_page_config(page_title="SIS — Stock Intelligence System", layout="wide")
 
@@ -290,6 +291,17 @@ def render_final_results(result, packages):
     counts = result.get("counts") or {}
     st.caption(f"{counts.get('p10', 0)} saham selesai dianalisis. Pemeriksaan, analisis, dan pemeringkatan dijalankan otomatis di background.")
 
+    # Power Screener funnel: presentation only; Stage 3 remains the analytical source of truth.
+    def _select_funnel_symbol(symbol, horizon):
+        if horizon == "swing":
+            st.session_state["final_swing_symbol"] = symbol
+        else:
+            st.session_state["final_lt_symbol"] = symbol
+
+    render_opportunity_funnel(st, stage3, on_symbol=_select_funnel_symbol)
+    st.divider()
+    st.markdown("### Analisis Lengkap per Saham")
+
     swing_tab, lt_tab = st.tabs(["Swing", "Long-Term"])
     with swing_tab:
         top = swing.get("top") or []
@@ -305,6 +317,11 @@ def render_final_results(result, packages):
             sym = row.get("symbol")
             if sym not in labels:
                 options.append(sym); labels[sym] = f"{sym} — {_human_state(row.get('execution_status'))}"
+        for candidate in candidates:
+            sym = candidate.get("symbol")
+            if sym and sym not in labels:
+                options.append(sym)
+                labels[sym] = f"{sym} — Semua saham lain tetap dapat dibuka"
         if options:
             selected = st.selectbox("Pilih saham untuk melihat analisis Swing", options, format_func=lambda x: labels.get(x, x), key="final_swing_symbol")
             cand = _candidate_for(stage3, selected)
@@ -317,9 +334,15 @@ def render_final_results(result, packages):
         top = long_term.get("top") or []
         if not top:
             st.info("Belum ada kandidat Long-Term yang memenuhi kriteria ranking pada snapshot ini.")
-        else:
-            labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Quality {row.get('quality')} | Confidence {row.get('confidence')}" for row in top}
-            selected = st.selectbox("Pilih saham untuk melihat analisis Long-Term", [row.get("symbol") for row in top], format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
+        labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Quality {row.get('quality')} | Confidence {row.get('confidence')}" for row in top}
+        lt_options = [row.get("symbol") for row in top if row.get("symbol")]
+        for candidate in candidates:
+            sym = candidate.get("symbol")
+            if sym and sym not in labels:
+                lt_options.append(sym)
+                labels[sym] = f"{sym} — Lihat analisis lengkap"
+        if lt_options:
+            selected = st.selectbox("Pilih saham untuk melihat analisis Long-Term", lt_options, format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
             cand = _candidate_for(stage3, selected)
             st.subheader(f"{selected} — Analisis Long-Term", anchor=False)
             _render_longterm_detail(cand, _package_for(packages, selected))
