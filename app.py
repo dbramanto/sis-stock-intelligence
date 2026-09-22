@@ -14,6 +14,7 @@ for _p in (_APP_ROOT / "integration_pipeline", _APP_ROOT / "stage3"):
         sys.path.insert(0, str(_p))
 from integration_pipeline.pipeline_p10_orchestrator import run_pipeline
 from stage3.stage3_e2e_runner import run_stage3_universe
+from stage3.opportunity_funnel_ui import render_opportunity_funnel
 
 st.set_page_config(page_title="SIS — Stock Intelligence System", layout="wide")
 
@@ -289,6 +290,17 @@ def render_final_results(result, packages):
     st.subheader("Hasil Analisis SIS")
     counts = result.get("counts") or {}
     st.caption(f"{counts.get('p10', 0)} saham selesai dianalisis. Pemeriksaan, analisis, dan pemeringkatan dijalankan otomatis di background.")
+
+    # Power Screener funnel: presentation only; Stage 3 remains the analytical source of truth.
+    def _select_funnel_symbol(symbol, horizon):
+        if horizon == "swing":
+            st.session_state["final_swing_symbol"] = symbol
+        else:
+            st.session_state["final_lt_symbol"] = symbol
+
+    render_opportunity_funnel(st, stage3, on_symbol=_select_funnel_symbol)
+    st.divider()
+    st.markdown("### Analisis Lengkap per Saham")
 
     swing_tab, lt_tab = st.tabs(["Swing", "Long-Term"])
     with swing_tab:
