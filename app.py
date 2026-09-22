@@ -219,15 +219,21 @@ def _render_swing_detail(candidate, package):
     sw = syn.get("swing") or {}
     ex = (candidate or {}).get("swing_execution") or {}
     status = ex.get("execution_status")
+    reasons = ex.get("reason_codes") or []
     action = {
         "READY": "SIAP BELI JIKA HARGA SESUAI",
-        "WAIT": "TUNGGU",
         "NOT_ATTRACTIVE": "JANGAN BELI DULU",
         "INSUFFICIENT_DATA": "TUNGGU DATA",
-    }.get(status, _human_state(status))
+    }.get(status)
+    if status == "WAIT":
+        if "AVOID_CHASING_EXTENDED_PRICE" in reasons or "CURRENT_RANGE_EXHAUSTED" in reasons:
+            action = "TUNGGU HARGA"
+        else:
+            action = "TUNGGU KONFIRMASI"
+    if not action:
+        action = _human_state(status)
     st.markdown("**Saran SIS**")
     st.write(f"**{action}**")
-    reasons = ex.get("reason_codes") or []
     if reasons:
         st.markdown("**Kenapa**")
         for code in reasons:
@@ -360,7 +366,7 @@ def render_final_results(result, packages):
             st.subheader(f"{selected} — Analisis Long-Term", anchor=False)
             _render_longterm_detail(cand, _package_for(packages, selected))
 
-    st.caption("Quality menunjukkan kekuatan kandidat berdasarkan data pendukung; Confidence menunjukkan tingkat keyakinan SIS terhadap penilaian tersebut. Keduanya dinilai terpisah dan tidak digabungkan menjadi satu nilai akhir.")
+    st.caption("Kualitas analisis menunjukkan kekuatan kandidat berdasarkan data pendukung. Tingkat keyakinan menunjukkan seberapa yakin SIS terhadap penilaian tersebut. Keduanya dinilai terpisah dan tidak digabungkan menjadi satu nilai akhir.")
 
 
 st.title("SIS — Stock Intelligence System")
