@@ -91,6 +91,60 @@ def _swing_row(candidate, rank=None):
     }
 
 
+
+def _longterm_business_quality(candidate):
+    syn = (candidate or {}).get("synthesis") or {}
+    state = ((((syn.get("shared") or {}).get("evidence_ledger") or {}).get("BUSINESS") or {}).get("state", "UNKNOWN"))
+    return {
+        "POSITIVE_STRONG": "Sangat baik",
+        "POSITIVE_MODERATE": "Baik",
+        "NEUTRAL": "Cukup",
+        "NEGATIVE_MODERATE": "Perlu perhatian",
+        "NEGATIVE_STRONG": "Lemah",
+        "UNKNOWN": "Belum cukup data",
+    }.get(state, "Belum cukup data")
+
+
+def _longterm_prospect_summary(candidate):
+    lt = (candidate or {}).get("longterm_outlook") or {}
+    out = lt.get("outlook") or {}
+    s1 = ((out.get("1Y") or {}).get("state"))
+    s3 = ((out.get("3Y") or {}).get("state"))
+    s5 = ((out.get("5Y") or {}).get("state"))
+    states = [s for s in (s1, s3, s5) if s]
+    if not states:
+        return "Belum cukup data"
+    if s3 == "NEGATIVE" or s5 == "NEGATIVE":
+        return "Negatif"
+    if s3 == "POSITIVE" and s5 == "POSITIVE":
+        return "Positif"
+    if s3 in {"POSITIVE", "STABLE"} and s5 in {"POSITIVE", "STABLE"}:
+        return "Stabil"
+    return "Hati-hati"
+
+
+def _longterm_risk_summary(candidate):
+    syn = (candidate or {}).get("synthesis") or {}
+    state = _risk_state(syn)
+    return {
+        "POSITIVE_STRONG": "Rendah",
+        "POSITIVE_MODERATE": "Relatif rendah",
+        "NEUTRAL": "Normal",
+        "NEGATIVE_MODERATE": "Moderat",
+        "NEGATIVE_STRONG": "Tinggi",
+        "UNKNOWN": "Belum cukup data",
+    }.get(state, "Belum cukup data")
+
+
+def _longterm_accumulation_context(candidate):
+    lt = (candidate or {}).get("longterm_outlook") or {}
+    return {
+        "FAVORABLE": "Mendukung",
+        "NORMAL": "Normal",
+        "CAUTIOUS": "Hati-hati",
+    }.get(lt.get("dca_context"), "Belum cukup data")
+
+
 def _longterm_row(candidate, rank=None):
     syn = (candidate or {}).get("synthesis") or {}
     lt = (candidate or {}).get("longterm_outlook") or {}
@@ -102,6 +156,10 @@ def _longterm_row(candidate, rank=None):
         "current_price": ex.get("current_price"),
         "price_assessment": _price_label(_valuation_state(syn)),
         "valuation_state": _valuation_state(syn),
+        "prospect_summary": _longterm_prospect_summary(candidate),
+        "business_quality": _longterm_business_quality(candidate),
+        "risk_summary": _longterm_risk_summary(candidate),
+        "accumulation_context": _longterm_accumulation_context(candidate),
         "outlook": lt.get("outlook"),
         "risk_state": _risk_state(syn),
         "dca_context": lt.get("dca_context"),
