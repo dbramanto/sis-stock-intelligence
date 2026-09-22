@@ -1,0 +1,59 @@
+name: Power Screener RC1 Gate
+
+on:
+  push:
+    branches: [sis-power-screener-funnel-rc1]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Integrate candidate into production app
+        run: python tools/apply_power_screener_patch.py
+      - name: Static compile
+        run: python -m py_compile app.py stage3/opportunity_funnel.py stage3/opportunity_funnel_ui.py
+      - name: Core regression
+        run: python -m unittest discover -s tests -v
+      - name: Integration regression
+        run: python -m unittest discover -s integration_pipeline/tests -v
+      - name: Stage 3 regression
+        run: python -m unittest discover -s stage3/tests -v
+      - name: Funnel contract
+        run: |
+          PYTHONPATH=stage3 python stage3/test_opportunity_funnel.py
+          PYTHONPATH=stage3 python stage3/test_opportunity_funnel_ui.py
+      - name: Real-data gate
+        run: python stage3_realdata_runner.py
+      - name: Streamlit startup smoke
+        run: |
+          streamlit run app.py --server.headless true --server.port 8765 > /tmp/sis-streamlit.log 2>&1 &
+          PID=$!
+          sleep 8
+          curl --fail --silent --show-error http://127.0.0.1:8765/ >/dev/null
+          kill $PID
+      - name: Commit deterministic app integration
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'app.py already integrated'
+            exit 0
+          fi
+          git config user.name 'sis-release-gate'
+          git config user.email 'sis-release-gate@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Integrate SIS Power Screener funnel into production app'
+          git push
