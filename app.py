@@ -226,7 +226,7 @@ def _render_swing_detail(candidate, package):
     action = {
         "READY": "SIAP BELI JIKA HARGA SESUAI",
         "NOT_ATTRACTIVE": "JANGAN BELI DULU",
-        "INSUFFICIENT_DATA": "TUNGGU DATA",
+        "INSUFFICIENT_DATA": "JANGAN BELI DULU",
     }.get(status)
     if status == "WAIT":
         if "AVOID_CHASING_EXTENDED_PRICE" in reasons or "CURRENT_RANGE_EXHAUSTED" in reasons:
@@ -291,17 +291,92 @@ def _longterm_price_label(candidate):
     }.get(valuation, "Belum dapat dinilai")
 
 
+
+def _longterm_summary_fields(candidate):
+    syn = (candidate or {}).get("synthesis") or {}
+    lt = (candidate or {}).get("longterm_outlook") or {}
+    evidence = ((syn.get("shared") or {}).get("evidence_ledger") or {})
+
+    out = lt.get("outlook") or {}
+    s1 = ((out.get("1Y") or {}).get("state"))
+    s3 = ((out.get("3Y") or {}).get("state"))
+    s5 = ((out.get("5Y") or {}).get("state"))
+    states = [s for s in (s1, s3, s5) if s]
+    if not states:
+        prospect = "Belum cukup data"
+    elif s3 == "NEGATIVE" or s5 == "NEGATIVE":
+        prospect = "Negatif"
+    elif s3 == "POSITIVE" and s5 == "POSITIVE":
+        prospect = "Positif"
+    elif s3 in {"POSITIVE", "STABLE"} and s5 in {"POSITIVE", "STABLE"}:
+        prospect = "Stabil"
+    else:
+        prospect = "Hati-hati"
+
+    business_state = (evidence.get("BUSINESS") or {}).get("state", "UNKNOWN")
+    business = {
+        "POSITIVE_STRONG": "Sangat baik",
+        "POSITIVE_MODERATE": "Baik",
+        "NEUTRAL": "Cukup",
+        "NEGATIVE_MODERATE": "Perlu perhatian",
+        "NEGATIVE_STRONG": "Lemah",
+        "UNKNOWN": "Belum cukup data",
+    }.get(business_state, "Belum cukup data")
+
+    risk_state = (evidence.get("RISK") or {}).get("state", "UNKNOWN")
+    risk = {
+        "POSITIVE_STRONG": "Rendah",
+        "POSITIVE_MODERATE": "Relatif rendah",
+        "NEUTRAL": "Normal",
+        "NEGATIVE_MODERATE": "Moderat",
+        "NEGATIVE_STRONG": "Tinggi",
+        "UNKNOWN": "Belum cukup data",
+    }.get(risk_state, "Belum cukup data")
+
+    accumulation = {
+        "FAVORABLE": "Mendukung",
+        "NORMAL": "Normal",
+        "CAUTIOUS": "Hati-hati",
+    }.get(lt.get("dca_context"), "Belum cukup data")
+
+    return {"prospect": prospect, "business": business, "risk": risk, "accumulation": accumulation}
+
+
 def _render_longterm_detail(candidate, package):
     syn = (candidate or {}).get("synthesis") or {}
     base = syn.get("long_term") or {}
     lt = (candidate or {}).get("longterm_outlook") or {}
     risk = ((syn.get("shared") or {}).get("risk_families") or {}).get("RISK", {}).get("state")
+    summary = _longterm_summary_fields(candidate)
+    action = _longterm_decision_label(candidate)
+
+    st.markdown("**Ringkasan keputusan**")
+    c1, c2 = st.columns(2)
+    c1.metric("Prospek jangka panjang", summary.get("prospect"))
+    c1.metric("Kualitas bisnis", summary.get("business"))
+    c2.metric("Risiko", summary.get("risk"))
+    c2.metric("Konteks akumulasi", summary.get("accumulation"))
+
     st.markdown("**Saran SIS**")
-    st.write(f"**{_longterm_decision_label(candidate)}**")
-    st.markdown("**Penilaian harga**")
-    st.write(_longterm_price_label(candidate))
+    st.write(f"**{action}**")
+
+    if action != "LAYAK DIBELI":
+        st.markdown("**Apa yang menahan keputusan?**")
+        blockers = []
+        if summary.get("accumulation") == "Hati-hati":
+            blockers.append("Konteks akumulasi masih hati-hati.")
+        if summary.get("risk") in {"Moderat", "Tinggi"}:
+            blockers.append(f"Risiko masih berada pada tingkat {summary.get('risk').lower()}.")
+        valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
+        if valuation in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
+            blockers.append("Valuasi belum cukup mendukung untuk keputusan beli.")
+        if not blockers:
+            blockers.append("Bukti yang tersedia belum cukup kuat untuk meningkatkan keputusan menjadi Layak Dibeli.")
+        for item in blockers:
+            st.write(f"• {item}")
+
     out = lt.get("outlook") or {}
-    st.markdown("**Prospek**")
+    st.markdown("**Prospek rinci**")
     cols = st.columns(3)
     for col, horizon, label in zip(cols, ("1Y", "3Y", "5Y"), ("1 Tahun", "3 Tahun", "5 Tahun")):
         x = out.get(horizon) or {}
@@ -317,10 +392,11 @@ def _render_longterm_detail(candidate, package):
         for code in risks:
             st.write(f"• {_reason_text(code)}")
     with st.expander("Lihat detail analisis", expanded=False):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Kualitas analisis", base.get("quality", "—"))
         c2.metric("Tingkat keyakinan", base.get("confidence", "—"))
         c3.metric("Risiko", _human_state(risk))
+        c4.metric("Konteks akumulasi", _human_state(lt.get("dca_context")))
         _render_thesis_block(package, "long_term")
         fwd = lt.get("forward_evidence") or {}
         if fwd:
