@@ -416,7 +416,7 @@ with st.expander("Riwayat Input", expanded=False):
     history = list_snapshots()
     if history:
         labels = {f'{x["created_at"][:19].replace("T", " ")} | {x["status"]} | {x["snapshot_id"][-12:]}': x["snapshot_id"] for x in history}
-        sel = st.selectbox("Pilih snapshot", list(labels.keys()))
+        sel = st.selectbox("Pilih riwayat data", list(labels.keys()))
         if st.button("Muat Riwayat"):
             snap = load_snapshot(labels[sel])
             for bi in range(1, 12):

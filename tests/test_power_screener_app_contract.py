@@ -75,5 +75,10 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn('Area entry:', self.src)
 
 
+    def test_snapshot_word_is_hidden_from_user_facing_app_text(self):
+        self.assertNotIn('Pilih snapshot', self.src)
+        self.assertIn('Pilih riwayat data', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
