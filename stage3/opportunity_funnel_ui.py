@@ -13,7 +13,10 @@ def _fmt_price(value):
     if value is None:
         return "—"
     try:
-        return f"Rp{float(value):,.0f}".replace(",", ".")
+        number = float(value)
+        if number.is_integer():
+            return f"{number:,.0f}".replace(",", ".")
+        return f"{number:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
     except (TypeError, ValueError):
         return str(value)
 

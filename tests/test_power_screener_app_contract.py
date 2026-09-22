@@ -58,5 +58,10 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn('st.write(f"**Konteks DCA:', self.src)
 
 
+    def test_price_format_is_numeric_only(self):
+        self.assertIn('return f"{number:,.0f}".replace(",", ".")', self.src)
+        self.assertNotIn('return f"Rp', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()

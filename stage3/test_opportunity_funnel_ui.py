@@ -2,12 +2,12 @@ from opportunity_funnel_ui import _action_icon, _entry_text, _fmt_price, _plain_
 
 
 def test_price_format_is_indonesian_user_friendly():
-    assert _fmt_price(3140) == "Rp3.140"
+    assert _fmt_price(3140) == "3.140"
     assert _fmt_price(None) == "—"
 
 
 def test_entry_text_uses_existing_engine_range_only():
-    assert _entry_text({"entry_area": {"low": 3100, "high": 3170}}) == "Rp3.100 – Rp3.170"
+    assert _entry_text({"entry_area": {"low": 3100, "high": 3170}}) == "3.100 – 3.170"
     assert _entry_text({"entry_area": None}) == "Belum tersedia"
 
 
@@ -36,8 +36,15 @@ def test_swing_plain_language_wording_is_actionable():
     assert _plain_reason("TUNGGU KONFIRMASI") == "Harga bisa menarik, tetapi sinyal teknikal belum cukup kuat untuk entry."
     assert _plain_reason("JANGAN BELI DULU") == "Kondisi saat ini belum memenuhi syarat SIS untuk membuka posisi Swing."
 
+def test_price_format_has_no_currency_symbol():
+    assert _fmt_price(1250) == "1.250"
+    assert _fmt_price(1250.5) == "1.250,50"
+    assert "Rp" not in _fmt_price(1250)
+
+
 if __name__ == "__main__":
     test_price_format_is_indonesian_user_friendly()
+    test_price_format_has_no_currency_symbol()
     test_entry_text_uses_existing_engine_range_only()
     test_action_icons_are_consistent()
     test_plain_language_reason_is_present_for_every_user_action()
