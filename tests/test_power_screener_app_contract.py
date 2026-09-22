@@ -49,5 +49,14 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertNotIn('Confidence menunjukkan tingkat keyakinan SIS', self.src)
 
 
+    def test_longterm_detail_matches_funnel_decision_language(self):
+        self.assertIn('return "LAYAK DIBELI"', self.src)
+        self.assertIn('return "BAGUS, TUNGGU HARGA"', self.src)
+        self.assertIn('return "PERTIMBANGKAN / TUNGGU"', self.src)
+        self.assertIn('return "BELUM LAYAK"', self.src)
+        self.assertIn('st.markdown("**Penilaian harga**")', self.src)
+        self.assertNotIn('st.write(f"**Konteks DCA:', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
