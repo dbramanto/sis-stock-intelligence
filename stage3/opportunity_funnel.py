@@ -93,15 +93,13 @@ def _swing_row(candidate, rank=None):
 
 
 def _longterm_business_quality(candidate):
-    syn = (candidate or {}).get("synthesis") or {}
-    state = ((((syn.get("shared") or {}).get("evidence_ledger") or {}).get("BUSINESS") or {}).get("state", "UNKNOWN"))
+    business = (((candidate or {}).get("dossier") or {}).get("domains") or {}).get("business") or {}
+    state = business.get("state", "NOT_EVALUATED") if isinstance(business, dict) else "NOT_EVALUATED"
     return {
-        "POSITIVE_STRONG": "Sangat baik",
-        "POSITIVE_MODERATE": "Baik",
-        "NEUTRAL": "Cukup",
-        "NEGATIVE_MODERATE": "Perlu perhatian",
-        "NEGATIVE_STRONG": "Lemah",
-        "UNKNOWN": "Belum cukup data",
+        "STRONG": "Baik",
+        "MIXED": "Cukup",
+        "WEAK": "Perlu perhatian",
+        "NOT_EVALUATED": "Belum cukup data",
     }.get(state, "Belum cukup data")
 
 
