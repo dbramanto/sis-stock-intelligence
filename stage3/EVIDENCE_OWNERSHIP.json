@@ -1,0 +1,72 @@
+{
+  "technical": [
+    "trend",
+    "price_structure",
+    "momentum",
+    "participation",
+    "relative_strength",
+    "volatility",
+    "setup_entry",
+    "invalidation"
+  ],
+  "business": [
+    "profitability",
+    "growth",
+    "efficiency",
+    "financial_strength",
+    "earnings_quality",
+    "durability",
+    "capital_allocation",
+    "business_context"
+  ],
+  "cash_flow": [
+    "ocf_quality",
+    "fcf_quality",
+    "cash_conversion",
+    "profit_cash_divergence",
+    "fcf_sustainability",
+    "cash_trend_consistency",
+    "capital_intensity",
+    "cash_stress"
+  ],
+  "valuation": [
+    "absolute_valuation",
+    "historical_valuation",
+    "sector_relative_valuation",
+    "earnings_yield",
+    "fcf_yield",
+    "growth_adjusted_context",
+    "valuation_dispersion",
+    "evidence_sufficiency"
+  ],
+  "sector": [
+    "classification",
+    "sector_state",
+    "industry_state",
+    "relative_leadership",
+    "context_momentum",
+    "commodity_exposure",
+    "macro_exposure",
+    "tailwind_headwind"
+  ],
+  "catalyst": [
+    "event_inventory",
+    "direction",
+    "materiality",
+    "event_window",
+    "probability_confidence",
+    "priced_in_assessment",
+    "event_relevance",
+    "net_catalyst_context"
+  ],
+  "risk": [
+    "market_risk",
+    "sector_industry_risk",
+    "business_risk",
+    "financial_cash_risk",
+    "liquidity_execution_risk",
+    "valuation_risk",
+    "technical_risk",
+    "event_data_risk"
+  ]
+}

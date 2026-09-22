@@ -1,0 +1,35 @@
+SIS S2 INTEGRATION RC2 - AUDIT-TOOL RELEASE GATE
+Date: 2026-09-21
+
+Scope fixed:
+1. Explicit sector applicability; no sector guessing from B10/ticker.
+2. Swing actionable materiality completed.
+3. Long-Term actionable materiality completed.
+4. Thesis invalidation made family-specific and non-empty.
+5. Permanent regression tests added for the above defects.
+
+Gate results:
+- Static/compile: PASS
+- Unit + regression: PASS (83/83)
+- Historical 32-candidate integration: PASS
+- S2 packages: 32
+- Horizon theses: 64
+- Swing actionable UNASSESSED: 0
+- Long-Term actionable UNASSESSED: 0
+- Empty invalidation conditions: 0
+- Legacy generic invalidation conditions: 0
+- Stress 10,000 Swing + Long-Term research cycles: PASS
+- State mutation/leak guard: PASS
+- Adversarial output guards: PASS
+- No ranking/scoring/BUY/SELL/Entry/TP/SL introduced: unchanged contract
+
+Observed thesis-status delta vs prior runtime:
+- Swing: no status changes.
+- Long-Term: ASLI WEAKENED -> INVALIDATED; DPUM WEAKENED -> INVALIDATED.
+  Both deltas are explained by >=2 independent MATERIAL contradictions under the existing ThesisBuilder invalidation-first rule.
+
+Security Master note:
+- Applicability semantics are implemented.
+- Actual Security Master population remains optional/external; missing context does not cause sector inference.
+
+Release gate: PASS for S2 candidate validation.

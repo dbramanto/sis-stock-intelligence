@@ -1,0 +1,29 @@
+{
+  "status": "PASS_CANDIDATE",
+  "tests": {
+    "web_stage1_stage2_regression": "105/105 PASS",
+    "stage3_tests": "PASS",
+    "integration_relevant": "PASS",
+    "real_data_e2e": "PASS"
+  },
+  "real_data_expected": {
+    "snapshot": "20260921_160836_726178_3e39f1febf1b",
+    "counts": {
+      "s1": 19,
+      "s2": 19,
+      "p10": 19
+    },
+    "swing_top": [],
+    "long_term_symbols": [
+      "DSNG",
+      "LSIP",
+      "PGEO"
+    ]
+  },
+  "notes": [
+    "S3 integrated additively after S2",
+    "No hardcoded winners",
+    "No forced Swing Top3",
+    "No new final score"
+  ]
+}

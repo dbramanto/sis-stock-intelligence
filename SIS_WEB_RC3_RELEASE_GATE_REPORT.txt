@@ -1,0 +1,24 @@
+SIS WEB RC3 — RELEASE GATE REPORT
+=================================
+Scope: Web integration over S2 RC2 audited engine. S2 engine logic unchanged.
+
+UI contract
+- Run Stage 1 replaced by Run Analysis: PASS
+- S1 validation/normalization/reconciliation hidden during normal run: PASS
+- S1 PASS automatically flows to S2: PASS
+- S1 blocked/review stops before S2 with user-friendly notice: PASS
+- S2 Swing and Long-Term displayed independently: PASS
+- S2 thesis status/confidence/reasons/contradictions/risks/invalidation displayed: PASS
+- Evidence lineage retained in backend package, not dumped into main UI: PASS
+- No rank/score/BUY/SELL/Entry/TP/SL introduced: PASS
+
+AUDIT-TOOL RELEASE GATE
+- Static/compile: PASS
+- Unit/regression: 88/88 PASS
+- Historical integration dry test: PASS (32 candidates / 32 S2 packages / 64 horizon theses)
+- Output contract check: PASS
+- User-notice adversarial guard: PASS
+- Repeat/state stress: 100x PASS
+- Packaging/dependency pre-flight: PASS
+
+Target-machine validation still required because Streamlit runtime is not installed in the audit container.

@@ -1,0 +1,15 @@
+| **Symbol** | **Pricesvg** |
+| ---------- | ------------ |
+
+**Foreign Flow**
+**Net Foreign Buy / Sell**
+**1 Month Net Foreign Flow**
+**3 Month Net Foreign Flow**
+**Bandar Value**
+**Bandar Accum/Dist**
+**Net Insider Buy / Sell (3M) (%)**
+**Net Insider Buy / Sell (1Y) (%)**
+
+| [**DCII**](https://stockbit.com/symbol/DCII) | 201,950.00 | (3.31 B) | (60.60 M) | (99.42 M) | 599.71 M | (4.11 B) | 33.33 | - | - |
+| [**UNTR**](https://stockbit.com/symbol/UNTR) | 24,825.00 | 2,338.95 B | 1.08 B | 62.30 B | (258.10 B) | 318.72 B | 13.04 | 1.78% | 7.70% |
+| [**MGLV**](https://stockbit.com/symbol/MGLV) | 14,400.00 | 27.81 B | 1.22 B | 21.71 B | 33.03 B | (60.37 B) | 34.88 | -15.67% | 63.07% |

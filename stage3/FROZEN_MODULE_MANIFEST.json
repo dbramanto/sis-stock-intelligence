@@ -1,0 +1,30 @@
+{
+  "stage3a_technical.py": {
+    "module": "A",
+    "sha256": "c35a76ba876f2994058695bcbcf43cf54ae5adb368320910e65944ede7313ba2"
+  },
+  "stage3b_fundamental.py": {
+    "module": "B",
+    "sha256": "e0d00abb0612382f78b837fb3e0ffea663a07d02b832ad2fdb6829920dd944d5"
+  },
+  "stage3c_cash.py": {
+    "module": "C",
+    "sha256": "4c5f95e5af4831777a190c8dc1f2d0c6e6a6a6da36ee86d763e0e0f14951c23b"
+  },
+  "stage3d_valuation.py": {
+    "module": "D",
+    "sha256": "1d485088bea8738737975ee5c1c0eb0ed61f05d6af9933bca0a13837684598a5"
+  },
+  "stage3e_sector.py": {
+    "module": "E",
+    "sha256": "f17a7e3de81d8673c8362ef18eb061cbae50b520b76a98294b49f3c86f906ad9"
+  },
+  "stage3f_catalyst.py": {
+    "module": "F",
+    "sha256": "b44a0814f1a5459b42a58fdbb88c378ea7387c3f259d80c1ecf57f019c1b17ac"
+  },
+  "stage3g_risk.py": {
+    "module": "G",
+    "sha256": "4e62d1731b08015d7e74596aa7eb60b805558c2ebacbcb80704e0d55a490da2a"
+  }
+}

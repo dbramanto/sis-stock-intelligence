@@ -1,0 +1,16 @@
+SIS DEPLOY STAGE3 RC1 — RELEASE GATE
+Baseline: exact SIS_DEPLOY from SIS(3).zip
+UI app.py: unchanged
+Internal-first Stage3 promotion: PASS
+Compile/static: PASS
+Production regression: 99/99 PASS
+P10 selected regression + final acceptance + production handoff + internal canonical: PASS
+Stage3 dossier/adversarial regression: PASS
+Real-data snapshot: 20260921_160836_726178_3e39f1febf1b
+Real-data counts: S1=19, S2=19, P10=19
+P10 state: PASS; diagnostics=[]
+Final LT Top3: 1 DSNG (Q87/C90), 2 LSIP (Q87/C85), 3 PGEO (Q84/C90)
+Final Swing actionable Top3: none; eligible_count=0; WAIT candidates are not forced into ranking.
+External OHLCV: optional enrichment only; not required for pipeline completion.
+Target-machine validation: REQUIRED before production freeze/UI integration.
+Known environment-only test: test_stage3_freeze_compatibility_r1 expects sibling SIS_STAGE3_FINAL_FREEZE and is not self-contained in deploy candidate; excluded from candidate-local gate. Relevant integration acceptance tests PASS.

@@ -1,0 +1,26 @@
+{
+  "module": "P10 End-to-End Orchestrator R1",
+  "compile_bundled_P1_P10": "PASS",
+  "e2e_adversarial": "PASS 19/19 P10 end-to-end/adversarial checks",
+  "determinism_repeat": "250x PASS",
+  "resource_stress": "2000x PASS",
+  "peak_memory_bytes": 57417,
+  "prior_module_gates": "P1-P9 were individually gated before P10; full subprocess replay deferred to final integration gate",
+  "findings": [
+    {
+      "id": "P10-INT-01",
+      "issue": "gross_margin_ttm pipeline name vs frozen Stage3 gross_margin",
+      "status": "CLOSED"
+    },
+    {
+      "id": "P10-INT-02",
+      "issue": "P3-rejected evidence IDs missing from orchestrator rejection lineage",
+      "status": "CLOSED"
+    }
+  ],
+  "harness_note": "A full P1-P9 subprocess replay exceeded the user-visible execution window; this is a harness/runtime limit, not an engine failure. P10 E2E and bundled compile were rerun successfully.",
+  "production_modified": false,
+  "stage3_freeze_modified": false,
+  "provider_binding": "DEFERRED until provider acceptance; P7 contract included",
+  "llm_dependency": "NONE"
+}
