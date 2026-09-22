@@ -60,8 +60,10 @@ def _top3_card(st, row, horizon):
         st.write(f"Area beli: **{_entry_text(row)}**")
         st.caption(f"Target 1 {_fmt_price(row.get('target_1'))} · Target 2 {_fmt_price(row.get('target_2'))} · Batas risiko {_fmt_price(row.get('risk_boundary'))}")
     else:
-        st.write(f"Harga referensi: **{_fmt_price(row.get('current_price'))}**")
-        st.caption(f"Penilaian harga: {row.get('price_assessment') or 'Belum dapat dinilai'}")
+        st.write(f"Prospek jangka panjang: **{row.get('prospect_summary') or 'Belum cukup data'}**")
+        st.write(f"Kualitas bisnis: **{row.get('business_quality') or 'Belum cukup data'}**")
+        st.write(f"Risiko: **{row.get('risk_summary') or 'Belum cukup data'}**")
+        st.write(f"Konteks akumulasi: **{row.get('accumulation_context') or 'Belum cukup data'}**")
     st.caption(_plain_reason(action))
 
 
@@ -81,9 +83,11 @@ def _render_all(st, rows, horizon, on_symbol=None):
     else:
         table = [{
             "Saham": r.get("symbol"),
+            "Prospek jangka panjang": r.get("prospect_summary") or "Belum cukup data",
+            "Kualitas bisnis": r.get("business_quality") or "Belum cukup data",
+            "Risiko": r.get("risk_summary") or "Belum cukup data",
+            "Konteks akumulasi": r.get("accumulation_context") or "Belum cukup data",
             "Saran SIS": f"{_action_icon(r.get('action'))} {str(r.get('action') or '').title()}",
-            "Harga": _fmt_price(r.get("current_price")),
-            "Penilaian harga": r.get("price_assessment") or "Belum dapat dinilai",
         } for r in filtered]
     st.dataframe(table, use_container_width=True, hide_index=True)
     if on_symbol and filtered:
