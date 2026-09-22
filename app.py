@@ -256,13 +256,47 @@ def _render_swing_detail(candidate, package):
         _render_thesis_block(package, "swing")
 
 
+def _longterm_decision_label(candidate):
+    syn = (candidate or {}).get("synthesis") or {}
+    base = syn.get("long_term") or {}
+    lt = (candidate or {}).get("longterm_outlook") or {}
+    if base.get("analytical_status") != "PASS" or lt.get("status") != "COMPLETE":
+        return "BELUM LAYAK"
+    dca = lt.get("dca_context")
+    o3 = ((lt.get("outlook") or {}).get("3Y") or {}).get("state")
+    valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
+    risk = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("RISK") or {}).get("state", "UNKNOWN")
+    if risk == "NEGATIVE_STRONG" or o3 == "NEGATIVE":
+        return "BELUM LAYAK"
+    if dca == "FAVORABLE" and o3 in {"POSITIVE", "STABLE"} and valuation not in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
+        return "LAYAK DIBELI"
+    if valuation in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
+        return "BAGUS, TUNGGU HARGA"
+    return "PERTIMBANGKAN / TUNGGU"
+
+
+def _longterm_price_label(candidate):
+    syn = (candidate or {}).get("synthesis") or {}
+    valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
+    return {
+        "POSITIVE_STRONG": "Murah / diskon",
+        "POSITIVE_MODERATE": "Menarik",
+        "NEUTRAL": "Wajar",
+        "NEGATIVE_MODERATE": "Agak mahal",
+        "NEGATIVE_STRONG": "Mahal",
+        "UNKNOWN": "Belum dapat dinilai",
+    }.get(valuation, "Belum dapat dinilai")
+
+
 def _render_longterm_detail(candidate, package):
     syn = (candidate or {}).get("synthesis") or {}
     base = syn.get("long_term") or {}
     lt = (candidate or {}).get("longterm_outlook") or {}
     risk = ((syn.get("shared") or {}).get("risk_families") or {}).get("RISK", {}).get("state")
     st.markdown("**Saran SIS**")
-    st.write(f"**Konteks DCA: {_human_state(lt.get('dca_context'))}**")
+    st.write(f"**{_longterm_decision_label(candidate)}**")
+    st.markdown("**Penilaian harga**")
+    st.write(_longterm_price_label(candidate))
     out = lt.get("outlook") or {}
     st.markdown("**Prospek**")
     cols = st.columns(3)
