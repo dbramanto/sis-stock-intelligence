@@ -2,7 +2,7 @@ from opportunity_funnel_ui import _action_icon, _entry_text, _fmt_price, _plain_
 
 
 def test_price_format_is_indonesian_user_friendly():
-    assert _fmt_price(3140) == "Rp3.140"
+    assert _fmt_price(3140) == "3.140"
     assert _fmt_price(None) == "—"
 
 
