@@ -313,14 +313,13 @@ def _longterm_summary_fields(candidate):
     else:
         prospect = "Hati-hati"
 
-    business_state = (evidence.get("BUSINESS") or {}).get("state", "UNKNOWN")
+    business_domain = (candidate or {}).get("dossier", {}).get("domains", {}).get("business", {})
+    business_state = business_domain.get("state", "NOT_EVALUATED") if isinstance(business_domain, dict) else "NOT_EVALUATED"
     business = {
-        "POSITIVE_STRONG": "Sangat baik",
-        "POSITIVE_MODERATE": "Baik",
-        "NEUTRAL": "Cukup",
-        "NEGATIVE_MODERATE": "Perlu perhatian",
-        "NEGATIVE_STRONG": "Lemah",
-        "UNKNOWN": "Belum cukup data",
+        "STRONG": "Baik",
+        "MIXED": "Cukup",
+        "WEAK": "Perlu perhatian",
+        "NOT_EVALUATED": "Belum cukup data",
     }.get(business_state, "Belum cukup data")
 
     risk_state = (evidence.get("RISK") or {}).get("state", "UNKNOWN")
