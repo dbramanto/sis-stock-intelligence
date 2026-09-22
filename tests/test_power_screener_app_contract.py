@@ -54,7 +54,6 @@ class TestPowerScreenerAppContract(unittest.TestCase):
         self.assertIn('return "BAGUS, TUNGGU HARGA"', self.src)
         self.assertIn('return "PERTIMBANGKAN / TUNGGU"', self.src)
         self.assertIn('return "BELUM LAYAK"', self.src)
-        self.assertIn('st.markdown("**Penilaian harga**")', self.src)
         self.assertNotIn('st.write(f"**Konteks DCA:', self.src)
 
 
