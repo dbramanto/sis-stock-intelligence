@@ -22,3 +22,17 @@ jobs:
         run: python -m unittest -v tests.test_d1_validated_snapshot
       - name: Full regression suite
         run: python -m unittest discover -s tests -p 'test*.py' -v
+      - name: Build clean candidate
+        run: |
+          mkdir -p candidate
+          rsync -a --exclude='.git' --exclude='.github' --exclude='candidate' --exclude='__pycache__' --exclude='*.pyc' ./ candidate/
+          python -m py_compile candidate/app_v2.py
+          test -f candidate/stage1/history.py
+          test -f candidate/requirements.txt
+      - name: Upload audited candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: SIS_v2_D1_candidate
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14
