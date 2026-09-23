@@ -16,8 +16,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Compile Stage 1 and D1 tests
-        run: python -m compileall -q stage1 tests/test_d1_validated_snapshot.py
+      - name: Compile D1 v2, Stage 1 and tests
+        run: python -m py_compile app_v2.py && python -m compileall -q stage1 tests/test_d1_validated_snapshot.py
       - name: D1 validated snapshot tests
         run: python -m unittest -v tests.test_d1_validated_snapshot
       - name: Full regression suite
