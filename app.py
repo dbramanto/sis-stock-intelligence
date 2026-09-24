@@ -301,7 +301,4 @@ if st.session_state.get("v2_stage3"):
     if st.session_state.get("v2_detail_symbol"):
         render_stock_detail(st, st.session_state["v2_stage3"], st.session_state["v2_detail_symbol"], st.session_state.get("v2_detail_horizon", "swing"))
 
-with st.container(border=True):
-    st.markdown('<div class="sectionhead"><h3>Alur Proses Background</h3><span class="eyebrow">Fail Closed</span></div><div class="flow"><div><b>1 · Parsing</b>Baca B1–B11</div><div><b>2 · Validasi</b>Guard & konsistensi</div><div><b>3 · Snapshot</b>Auto-save setelah S1 PASS</div><div><b>4 · Analisis</b>Stage 2 → P10 → 3</div><div><b>5 · Hasil</b>Siap untuk D2</div></div>', unsafe_allow_html=True)
-
 st.markdown('<div class="sis-footer"><span><b>SIS</b> · Smart Investment Screener &nbsp; | &nbsp; Analisis berbasis data penutupan. Bukan ajakan jual beli saham.</span><span>Investasi yang baik dimulai dari informasi yang tepat.</span></div>', unsafe_allow_html=True)
