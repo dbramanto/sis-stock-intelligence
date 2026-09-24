@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from storage_adapter import JsonStore, StorageUnavailable, storage_backend
 
@@ -31,12 +31,18 @@ class StorageAdapterTests(unittest.TestCase):
         env = {
             "SIS_STORAGE_BACKEND": "cloud",
             "SIS_CLOUD_STORAGE_URL": "https://example.invalid",
-            "SIS_CLOUD_STORAGE_TOKEN": "secret",
+            "SIS_CLOUD_STORAGE_ACCESS_KEY": "access",
+            "SIS_CLOUD_STORAGE_SECRET_KEY": "secret",
+            "SIS_CLOUD_STORAGE_BUCKET": "sis-test",
         }
         with patch.dict(os.environ, env, clear=True):
             store = JsonStore("/tmp/unused")
-            with self.assertRaisesRegex(StorageUnavailable, "CLOUD_STORAGE_ADAPTER_NOT_WIRED"):
+            client = Mock()
+            client.list_objects_v2.side_effect = RuntimeError("cloud unavailable")
+            store._client = client
+            with self.assertRaisesRegex(StorageUnavailable, "CLOUD_STORAGE_LIST_FAILED"):
                 store.list("input_history")
+            self.assertFalse(Path("/tmp/unused/input_history").exists())
 
 
 if __name__ == "__main__":
