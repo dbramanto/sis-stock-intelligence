@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import importlib.util
 from zoneinfo import ZoneInfo
 import json
 import sys
@@ -9,12 +10,15 @@ import logging
 from logging.handlers import RotatingFileHandler
 import streamlit as st
 
+_APP_ROOT = Path(__file__).resolve().parent
+if str(_APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APP_ROOT))
+
 from stage1.clipboard import parse_clipboard_text
 from stage1.pipeline import run_stage1, validate_batch
 from stage1.history import get_snapshot_batch, list_snapshots, load_snapshot, save_validated_snapshot, update_snapshot_analysis
 from stage2.runner import run_stage2
 
-_APP_ROOT = Path(__file__).resolve().parent
 for _p in (_APP_ROOT / "integration_pipeline", _APP_ROOT / "stage3"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
