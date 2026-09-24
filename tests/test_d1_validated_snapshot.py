@@ -67,7 +67,7 @@ class TestD1ValidatedSnapshot(unittest.TestCase):
             h=list_snapshots(td,validated_only=True);self.assertEqual(len(h),1);self.assertEqual(h[0]["snapshot_id"],good["snapshot_id"])
     def test_tampered_v5_validated_snapshot_is_rejected_and_hidden(self):
         with tempfile.TemporaryDirectory() as td:
-            x=self.save(td);p=__import__('pathlib').Path(td)/(x["snapshot_id"]+".json");d=json.loads(p.read_text());d.pop("canonical_digest");p.write_text(json.dumps(d))
+            x=self.save(td);p=__import__('pathlib').Path(td)/"input_history"/(x["snapshot_id"]+".json");d=json.loads(p.read_text());d.pop("canonical_digest");p.write_text(json.dumps(d))
             with self.assertRaisesRegex(ValueError,"INVALID_VALIDATED_SNAPSHOT"):load_snapshot(x["snapshot_id"],td)
             self.assertEqual(list_snapshots(td,validated_only=True),[])
     def test_batch_id_is_strictly_b1_to_b11(self):
