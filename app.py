@@ -237,7 +237,7 @@ with main:
                 text = st.text_area(f"Data B{i}", height=230, key=f"v2_b{i}", placeholder=f"Tempel hasil screening Stockbit B{i} di sini…")
                 raw_inputs[i] = text
                 if text.strip():
-                    df, parse_issues = parse_clipboard_text(text, batch_id=i)
+                    df, parse_issues = parse_clipboard_text(text)
                     schema_issues = validate_batch(df, i) if not parse_issues else []
                     all_issues = list(parse_issues) + list(schema_issues)
                     if all_issues:
