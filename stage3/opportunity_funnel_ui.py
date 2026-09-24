@@ -6,7 +6,7 @@ Presentation only. Ranking, entry area, targets, risk boundary, valuation state,
 and horizon decisions must already exist in the frozen Stage 3 output.
 """
 
-from opportunity_funnel import build_opportunity_funnel
+from opportunity_funnel import build_opportunity_funnel, _swing_action, _longterm_action, _longterm_row
 
 
 def _fmt_price(value):
@@ -96,6 +96,91 @@ def _render_all(st, rows, horizon, on_symbol=None):
         if st.button(f"Lihat rincian {selected}", key=f"funnel_all_open_{horizon}", use_container_width=True):
             on_symbol(selected, horizon)
 
+
+def _candidate(stage3, symbol):
+    wanted = str(symbol or "").strip().upper()
+    for row in (stage3.get("candidates") or []):
+        if str((row or {}).get("symbol") or "").strip().upper() == wanted:
+            return row
+    return None
+
+
+def _reason_text(code):
+    return {
+        "AVOID_CHASING_EXTENDED_PRICE": "Harga sudah terlalu jauh dari area referensi; hindari mengejar harga.",
+        "CURRENT_RANGE_EXHAUSTED": "Pergerakan harian sudah banyak terpakai; ruang entry baru lebih terbatas.",
+        "TREND_NOT_BULL": "Tren belum memenuhi syarat bullish SIS.",
+        "EXECUTION_CONFIRMATION_WEAK": "Konfirmasi momentum/partisipasi belum cukup kuat.",
+        "REWARD_RISK_BELOW_MINIMUM": "Perbandingan potensi hasil terhadap risiko belum memenuhi batas SIS.",
+        "NO_DEFENSIBLE_RISK_BOUNDARY": "Batas risiko yang layak belum dapat ditentukan dari data.",
+        "RR_NOT_COMPUTABLE": "Reward/risk belum dapat dihitung dengan aman.",
+        "TECHNICAL_DATA_NOT_FRESH": "Data teknikal belum cukup mutakhir untuk eksekusi.",
+        "INSUFFICIENT_INTERNAL_EXECUTION_EVIDENCE": "Bukti internal belum cukup untuk menyusun rencana entry.",
+    }.get(str(code), str(code).replace("_", " ").title())
+
+
+def render_stock_detail(st, stage3, symbol, horizon="swing"):
+    """Render evidence already present in frozen Stage 3; no new score/decision."""
+    c = _candidate(stage3, symbol)
+    if not c:
+        st.warning("Rincian saham tidak ditemukan pada hasil analisis ini.")
+        return
+    sw = (c.get("swing_execution") or {})
+    lt = (c.get("longterm_outlook") or {})
+    syn = (c.get("synthesis") or {})
+    st.markdown("---")
+    st.subheader(f"Rincian {str(symbol).upper()}")
+    st.caption("Rincian ini hanya menjelaskan hasil Stage 3 yang sudah tersimpan; tidak menghitung skor atau keputusan baru.")
+    swing_tab, long_tab = st.tabs(["Swing", "Jangka Panjang"])
+    with swing_tab:
+        action = _swing_action(c)
+        st.markdown(f"### {_action_icon(action)} {action.title()}")
+        a,b,c1,d = st.columns(4)
+        a.metric("Harga analisis", _fmt_price(sw.get("current_price")))
+        b.metric("Area beli", _entry_text(_swing_row_for_detail(sw)))
+        c1.metric("Target 1", _fmt_price(sw.get("target_1")))
+        d.metric("Batas risiko", _fmt_price(sw.get("risk_boundary")))
+        st.write(_plain_reason(action))
+        rr = sw.get("reward_risk") or {}
+        st.caption(f"Target 2: {_fmt_price(sw.get('target_2'))} · Reward/Risk T1: {rr.get('target_1') if rr.get('target_1') is not None else '—'} · Reward/Risk T2: {rr.get('target_2') if rr.get('target_2') is not None else '—'}")
+        reasons = list(sw.get("reason_codes") or [])
+        if reasons:
+            st.markdown("**Hal yang perlu diperhatikan**")
+            for code in reasons:
+                st.write("• " + _reason_text(code))
+    with long_tab:
+        action = _longterm_action(c)
+        st.markdown(f"### {_action_icon(action)} {action.title()}")
+        row = _longterm_row_for_detail(c)
+        a,b,c1,d = st.columns(4)
+        a.metric("Valuasi", row["price_assessment"])
+        b.metric("Prospek", row["prospect_summary"])
+        c1.metric("Kualitas bisnis", row["business_quality"])
+        d.metric("Risiko", row["risk_summary"])
+        st.write(_plain_reason(action))
+        outlook = lt.get("outlook") or {}
+        cols = st.columns(3)
+        for col, period in zip(cols, ("1Y","3Y","5Y")):
+            item = outlook.get(period) or {}
+            col.metric(f"Outlook {period}", item.get("state") or "—")
+            if item.get("confidence") is not None:
+                col.caption(f"Confidence: {item.get('confidence')}")
+        drivers = list(lt.get("forward_drivers") or [])
+        risks = list(lt.get("forward_risks") or [])
+        if drivers:
+            st.markdown("**Pendorong yang tercatat**")
+            st.write(" · ".join(str(x).replace("_", " ").title() for x in drivers))
+        if risks:
+            st.markdown("**Risiko yang tercatat**")
+            st.write(" · ".join(str(x).replace("_", " ").title() for x in risks))
+
+
+def _swing_row_for_detail(sw):
+    return {"entry_area": sw.get("entry_area")}
+
+
+def _longterm_row_for_detail(candidate):
+    return _longterm_row(candidate)
 
 def render_opportunity_funnel(st, stage3, on_symbol=None):
     """Render Top 3 for each horizon and preserve access to the full universe."""

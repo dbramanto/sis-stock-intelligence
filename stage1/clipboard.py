@@ -239,7 +239,34 @@ def _parse_stockbit_markdown(raw):
 
 
 
-def _parse_stockbit_vertical(raw):
+# Legacy Stockbit vertical captures can omit the visible Volume header while
+# retaining its value. Placement differs by B-layout. This map is a verified
+# source-layout contract, not a numeric guess. It is used only when batch_id is
+# supplied, Volume is absent, and every row is exactly one value wider.
+_LEGACY_VOLUME_POSITION = {
+    1: "END", 2: "BEFORE_VOLUME_MA20", 3: "END", 4: "END",
+    5: "BEFORE_VOLUME_MA20", 6: "BEFORE_VOLUME_MA20",
+    7: "BEFORE_VOLUME_MA20", 8: "END", 9: "BEFORE_VOLUME_MA20",
+}
+
+def _repair_legacy_vertical_header(header, value_width, batch_id):
+    if batch_id not in _LEGACY_VOLUME_POSITION:
+        return header, None
+    normalized = [_normalize_header(x) for x in header]
+    if "Volume" in normalized or value_width != len(header):
+        return header, None
+    if "Volume MA20" not in normalized:
+        return header, "LEGACY_VOLUME_ANCHOR_MISSING"
+    mode = _LEGACY_VOLUME_POSITION[batch_id]
+    fixed = list(header)
+    if mode == "END":
+        fixed.append("Volume")
+    else:
+        idx = normalized.index("Volume MA20")
+        fixed.insert(idx, "Volume")
+    return fixed, "LEGACY_MISSING_VOLUME_HEADER_REPAIRED"
+
+def _parse_stockbit_vertical(raw, batch_id=None):
     """Verified Stockbit shape: vertical headers, then ticker/value-row pairs."""
     lines = [line.strip() for line in raw.split("\n") if line.strip()]
     if not lines or lines[0] != "Symbol":
@@ -252,6 +279,13 @@ def _parse_stockbit_vertical(raw):
     if first is None:
         return pd.DataFrame(), ["VERTICAL_NO_SYMBOL_VALUE_PAIR"]
     header = lines[:first]
+    # Determine row width before validating the header. Legacy B1-B8 captures
+    # may have one omitted Volume header; repair only from the verified batch
+    # layout contract.
+    first_values = [x.strip() for x in lines[first + 1].split("\t")]
+    header, repair_note = _repair_legacy_vertical_header(header, len(first_values), batch_id)
+    if repair_note == "LEGACY_VOLUME_ANCHOR_MISSING":
+        return pd.DataFrame(), [repair_note]
     expected = len(header) - 1
     data = []
     pos = first
@@ -269,7 +303,7 @@ def _parse_stockbit_vertical(raw):
     return _finalize(header, data)
 
 
-def parse_clipboard_text(text: str):
+def parse_clipboard_text(text: str, batch_id=None):
     """Parse Stockbit browser clipboard data, fail-closed.
 
     Supported inputs:
@@ -288,7 +322,7 @@ def parse_clipboard_text(text: str):
     if "\t" in lines[0]:
         return _parse_tsv(raw)
     if lines[0].strip() == "Symbol":
-        return _parse_stockbit_vertical(raw)
+        return _parse_stockbit_vertical(raw, batch_id=batch_id)
     if any(line.strip().startswith("|") and line.strip().endswith("|") for line in lines):
         return _parse_stockbit_markdown(raw)
     return pd.DataFrame(), ["UNSUPPORTED_CLIPBOARD_DELIMITER_EXPECTED_TAB"]

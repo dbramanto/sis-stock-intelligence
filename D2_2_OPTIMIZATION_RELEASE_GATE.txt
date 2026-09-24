@@ -1,0 +1,21 @@
+SIS V2 — D2.2 RESULT EXPERIENCE OPTIMIZATION
+Release candidate: RC2
+Scope: presentation/detail only; D1, S2, P10, S3 engines, ranking engine, and D2.1 persistence locked.
+
+Changes:
+- Top-3 ticker is actionable and can open stock detail.
+- All-stock view retains search and can open selected stock detail.
+- Stock detail has independent Swing and Long-Term tabs.
+- Swing detail exposes frozen Stage-3 price, entry area, targets, risk boundary, reward/risk, and translated reason codes.
+- Long-Term detail exposes frozen Stage-3 valuation/prospect/business/risk context, 1Y/3Y/5Y outlook, drivers and risks.
+- No new analytical score, ranking, recommendation, target, or valuation is created by D2.2.
+
+Release gate:
+- Python compile: PASS
+- Root regression: 148/148 PASS
+- Stage3 tests: 10/10 PASS
+- Integration tests: 6/6 PASS
+- Opportunity funnel regression: PASS
+- D2.2 detail helper smoke: PASS
+- Locked-core drift check: PASS
+- Streamlit runtime smoke in build container: NOT RUN (Streamlit package unavailable in build container); target-machine RC1 runtime/persistence was previously confirmed by user.
