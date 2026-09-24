@@ -1,588 +1,307 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from pathlib import Path
+import sys
+import logging
+from logging.handlers import RotatingFileHandler
 import streamlit as st
+
 from stage1.clipboard import parse_clipboard_text
 from stage1.pipeline import run_stage1, validate_batch
-from stage1.schema import BATCHES
-from stage1.history import save_snapshot, list_snapshots, load_snapshot, get_snapshot_batch
+from stage1.history import get_snapshot_batch, list_snapshots, load_snapshot, save_validated_snapshot, update_snapshot_analysis
 from stage2.runner import run_stage2
 
-# Stage 3 deployment layer. Paths are local to this deployment artifact.
-import sys
-from pathlib import Path
 _APP_ROOT = Path(__file__).resolve().parent
 for _p in (_APP_ROOT / "integration_pipeline", _APP_ROOT / "stage3"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 from integration_pipeline.pipeline_p10_orchestrator import run_pipeline
 from stage3.stage3_e2e_runner import run_stage3_universe
-from stage3.opportunity_funnel_ui import render_opportunity_funnel
+from stage3.result_store import save_analysis_result, load_analysis_result, result_exists
+from stage3.opportunity_funnel_ui import render_opportunity_funnel, render_stock_detail
 
-st.set_page_config(page_title="SIS — Stock Intelligence System", layout="wide")
+st.set_page_config(page_title="SIS v2 — Input Data", page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
 
-STATUS_LABELS = {
-    "CONFIRMED": "Terkonfirmasi",
-    "PARTIALLY_CONFIRMED": "Terkonfirmasi sebagian",
-    "WEAKENED": "Melemah",
-    "INVALIDATED": "Tidak terkonfirmasi",
-    "INSUFFICIENT_EVIDENCE": "Data belum cukup",
-}
-CONF_LABELS = {"HIGH": "Tinggi", "MEDIUM": "Sedang", "LOW": "Rendah"}
+_LOG_DIR = _APP_ROOT / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_FILE = _LOG_DIR / "sis_runtime.log"
 
+def _build_logger():
+    logger = logging.getLogger("SIS.RUNTIME")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if not logger.handlers:
+        fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(fmt)
+        logger.addHandler(console)
+        file_handler = RotatingFileHandler(_LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+    return logger
 
-def friendly_input_issue(issue: str) -> str:
-    s = str(issue)
-    batch = s.split(":", 1)[0] if s.startswith("B") and ":" in s else ""
+LOG = _build_logger()
 
-    if "MISSING_SYMBOL_COLUMN" in s:
-        return f"{batch}: kolom Symbol/kode saham belum terbaca." if batch else "Kolom Symbol/kode saham belum terbaca."
-    if "DUPLICATE_SYMBOL" in s:
-        return f"{batch}: ada kode saham yang tercatat lebih dari satu kali." if batch else "Ada kode saham yang tercatat lebih dari satu kali."
-    if "MISSING_COLUMNS:" in s:
-        cols = [x.strip() for x in s.split("MISSING_COLUMNS:", 1)[1].split(",") if x.strip()]
-        detail = "; ".join(cols)
-        return f"{batch}: kolom berikut belum ditemukan: {detail}." if batch else f"Kolom berikut belum ditemukan: {detail}."
-    if "AMBIGUOUS_NUMERIC_FORMAT" in s or "INVALID_NUMERIC" in s:
-        parts = s.split(":")
-        if len(parts) >= 4 and parts[0].startswith("B"):
-            b, symbol = parts[0], parts[1]
-            field = ":".join(parts[2:-1])
-            return f"{b} — {symbol} — {field}: nilai belum dapat dibaca dengan aman."
-        return "Ada angka yang formatnya belum dapat dibaca dengan aman. Periksa kembali data yang ditempel."
-    return f"{batch}: sebagian data belum dapat dibaca dengan aman." if batch else "Sebagian data belum dapat dibaca dengan aman. Periksa kembali input."
+def _log_issues(stage, issues):
+    items = list(issues or [])
+    LOG.error("[%s] BLOCKED | issue_count=%d", stage, len(items))
+    for item in items:
+        LOG.error("[%s] ISSUE | %s", stage, item)
 
+if "sis_theme" not in st.session_state:
+    st.session_state.sis_theme = "light"
 
-def friendly_stage1_issue(issue: str) -> str:
-    s = str(issue)
-    if "MISSING_REQUIRED_BATCH" in s:
-        return "Belum semua bagian data B1–B11 tersedia."
-    if "UNIVERSE_MISMATCH" in s:
-        return "Daftar saham antarbagian data tidak sama. Pastikan seluruh B1–B11 berasal dari hasil screening yang sama."
-    if "UNIVERSE_INCOMPLETE" in s:
-        return "Jumlah saham yang terbaca belum sama dengan jumlah hasil screening."
-    if "PRICE_CONFLICT" in s:
-        symbol = s.split(":", 1)[0]
-        return f"Data harga {symbol} berbeda antarbagian input. Gunakan data dari sesi pengambilan yang sama."
-    if "CONTROL_CONFLICT" in s:
-        symbol = s.split(":", 1)[0]
-        return f"Ada data {symbol} yang tidak konsisten antarbagian input dan perlu diperiksa kembali."
-    if "EXPECTED_UNIVERSE_TOTAL_NOT_PROVIDED" in s or "INVALID_EXPECTED_UNIVERSE_TOTAL" in s:
-        return "Jumlah hasil screening belum valid."
-    return "Ada ketidaksesuaian data yang perlu diperiksa sebelum analisis dapat dilanjutkan."
+def _toggle_theme():
+    st.session_state.sis_theme = "dark" if st.session_state.sis_theme == "light" else "light"
 
-
-def unique_messages(messages):
-    return list(dict.fromkeys(messages))
-
-
-def render_notice(title, messages):
-    st.error(title)
-    for msg in unique_messages(messages):
-        st.write(f"• {msg}")
-
-
-def render_horizon(data: dict):
-    c1, c2 = st.columns(2)
-    c1.metric("Status tesis", STATUS_LABELS.get(data["thesis_status"], data["thesis_status"]))
-    c2.metric("Keyakinan evidence", CONF_LABELS.get(data["confidence"], data["confidence"]))
-
-    if data.get("main_reasons"):
-        st.markdown("**Alasan utama**")
-        for item in data["main_reasons"]:
-            st.write(f"• {item}")
-    if data.get("key_contradictions"):
-        st.markdown("**Hal yang melemahkan tesis**")
-        for item in data["key_contradictions"]:
-            st.write(f"• {item}")
-    if data.get("key_risks"):
-        st.markdown("**Risiko utama**")
-        for item in data["key_risks"]:
-            st.write(f"• {item}")
-    if data.get("invalidation_condition"):
-        st.markdown("**Kapan tesis perlu dievaluasi ulang**")
-        for item in data["invalidation_condition"]:
-            st.write(f"• {item}")
-
-
+def _peer_universe_total(parsed):
+    """Return dynamic universe size only when all B1-B11 symbol sets agree exactly."""
+    if set(parsed) != set(range(1, 12)):
+        return 0
+    sets = []
+    for i in range(1, 12):
+        df = parsed[i]
+        symbol_col = next((c for c in df.columns if str(c).strip().lower() == "symbol"), None)
+        if symbol_col is None:
+            return 0
+        symbols = {str(x).strip().upper() for x in df[symbol_col].tolist() if str(x).strip()}
+        sets.append(symbols)
+    first = sets[0]
+    return len(first) if first and all(s == first for s in sets[1:]) else 0
 
 def _canonical_map(df):
     out = {}
     for _, row in df.iterrows():
-        d = row.to_dict()
-        symbol = str(d.get("symbol", "")).strip().upper()
-        if symbol:
-            out[symbol] = d
+        d = row.to_dict(); symbol = str(d.get("symbol", "")).strip().upper()
+        if symbol: out[symbol] = d
     return out
 
-
-def run_stage3_from_current_analysis(s1_canonical, s2_packages, analysis_as_of, top_n=3):
-    p10 = run_pipeline(
-        stage2_records=s2_packages,
-        analysis_as_of=analysis_as_of,
-        canonical_by_symbol=_canonical_map(s1_canonical),
-    )
+def _run_stage3(canonical, packages, analysis_as_of):
+    LOG.info("[P10] START | packages=%d | as_of=%s", len(packages), analysis_as_of)
+    p10 = run_pipeline(stage2_records=packages, analysis_as_of=analysis_as_of, canonical_by_symbol=_canonical_map(canonical))
+    LOG.info("[P10] END | state=%s | payloads=%d | diagnostics=%d | rejected=%d", p10.state, len(p10.payloads), len(p10.diagnostics), len(p10.rejected_evidence_ids))
+    for item in p10.diagnostics:
+        LOG.warning("[P10] DIAGNOSTIC | %s", item)
     if p10.state == "BLOCKED":
-        return {"status": "BLOCKED", "stage": "P10", "diagnostics": list(p10.diagnostics)}
-    s3 = run_stage3_universe(list(p10.payloads), analysis_date=analysis_as_of, top_n=top_n)
-    return {
-        "status": s3.get("status"),
-        "counts": {"s1": len(s1_canonical), "s2": len(s2_packages), "p10": len(p10.payloads)},
-        "p10_state": p10.state,
-        "p10_diagnostics": list(p10.diagnostics),
-        "stage3": s3,
-    }
+        return {"status": "BLOCKED", "blocked_stage": "P10", "diagnostics": list(p10.diagnostics)}
+    LOG.info("[S3] START | payloads=%d | top_n=3", len(p10.payloads))
+    result = run_stage3_universe(list(p10.payloads), analysis_date=analysis_as_of, top_n=3)
+    LOG.info("[S3] END | status=%s | candidates=%s | blocked=%d", result.get("status"), result.get("candidate_count"), len(result.get("blocked", [])))
+    for item in result.get("blocked", []):
+        LOG.warning("[S3] BLOCKED_CANDIDATE | %s", item)
+    return result
 
+def _friendly(issue):
+    s = str(issue)
+    if "MISSING_SYMBOL_COLUMN" in s: return "Kolom Symbol/kode saham belum terbaca."
+    if "DUPLICATE_SYMBOL" in s: return "Ada kode saham yang tercatat lebih dari satu kali."
+    if "MISSING_COLUMNS:" in s: return "Ada kolom wajib yang belum ditemukan pada data."
+    if "UNIVERSE_MISMATCH" in s: return "Daftar saham antar B tidak sama. Pastikan B1–B11 berasal dari screening yang sama."
+    if "UNIVERSE_INCOMPLETE" in s: return "Jumlah saham antar batch tidak konsisten dengan universe sesi yang tervalidasi."
+    if "AMBIGUOUS_NUMERIC_FORMAT" in s or "INVALID_NUMERIC" in s: return "Ada angka yang tidak dapat dibaca dengan aman."
+    if "CONTROL_SANITY" in s: return "Ada nilai kontrol di luar batas yang masuk akal."
+    return "Data belum lolos pemeriksaan keamanan SIS."
 
-def _fmt_price(v):
-    if v is None:
-        return "—"
-    try:
-        number = float(v)
-        if number.is_integer():
-            return f"{number:,.0f}".replace(",", ".")
-        return f"{number:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    except (TypeError, ValueError):
-        return str(v)
+def _clear_analysis_state():
+    for key in ("v2_stage1", "v2_packages", "v2_stage3", "v2_snapshot_id", "v2_blocked", "v2_detail_symbol", "v2_detail_horizon"):
+        st.session_state.pop(key, None)
 
+def _market_label():
+    now = datetime.now(); hm = now.hour * 60 + now.minute
+    opened = now.weekday() < 5 and 9 * 60 <= hm <= 16 * 60
+    return ("Market Buka", "Input direkomendasikan setelah market tutup", "open") if opened else ("Market Tutup", "Waktu terbaik untuk input data", "closed")
 
-def _human_state(v):
-    labels = {
-        "PASS": "Kuat", "REVIEW": "Perlu perhatian", "LOW_QUALITY": "Kualitas rendah",
-        "READY": "Siap dipertimbangkan", "WAIT": "Menunggu momen yang lebih baik",
-        "NOT_ATTRACTIVE": "Belum menarik", "INSUFFICIENT_DATA": "Data belum cukup",
-        "POSITIVE": "Positif", "STABLE": "Stabil", "CAUTIOUS": "Hati-hati", "NEGATIVE": "Negatif",
-        "FAVORABLE": "Mendukung", "NORMAL": "Normal", "NEGATIVE_MODERATE": "Risiko moderat",
-        "NEGATIVE_STRONG": "Risiko tinggi", "POSITIVE_MODERATE": "Risiko relatif rendah",
-        "POSITIVE_STRONG": "Sangat mendukung", "NEUTRAL": "Netral", "UNKNOWN": "Belum diketahui",
-    }
-    return labels.get(str(v), str(v).replace("_", " ").title() if v is not None else "—")
+def _theme_css(theme):
+    dark = theme == "dark"
+    bg = "#081525" if dark else "#eef5fb"
+    surface = "#0f2238" if dark else "#ffffff"
+    surface2 = "#132a44" if dark else "#f6faff"
+    text = "#edf5ff" if dark else "#102b4e"
+    muted = "#9fb1c7" if dark else "#60738b"
+    border = "#29425e" if dark else "#d8e5f1"
+    shadow = "0 10px 28px rgba(0,0,0,.22)" if dark else "0 8px 24px rgba(28,73,117,.10)"
+    return f"""
+<style>
+:root{{--bg:{bg};--surface:{surface};--surface2:{surface2};--text:{text};--muted:{muted};--border:{border};--blue:#1473e6;--blue2:#0b5fc5;--green:#079455;--amber:#f5a300;--red:#dc3545;--shadow:{shadow};}}
+html,body,[class*="css"],.stApp{{font-family:Inter,Segoe UI,Arial,sans-serif;}}
+.stApp{{background:var(--bg);color:var(--text)}}
+[data-testid="stHeader"]{{height:0;background:transparent}}
+[data-testid="stToolbar"],[data-testid="stDecoration"],#MainMenu,footer{{display:none!important}}
+[data-testid="stSidebar"]{{display:none!important}}
+.block-container{{max-width:1540px;padding:0 18px 28px!important}}
+.sis-header{{margin:0 -18px 14px;padding:12px 24px;background:linear-gradient(115deg,#0a315d,#0b477e 60%,#07345e);color:white;display:flex;align-items:center;gap:26px;min-height:74px;box-shadow:0 5px 18px rgba(0,33,70,.22)}}
+.brand{{display:flex;align-items:center;gap:14px;min-width:300px}}.brandmark{{font:900 42px Georgia,serif;letter-spacing:-2px}}.brandtext b{{font-size:16px}}.brandtext small{{display:block;font-size:11px;opacity:.86;margin-top:4px}}
+.nav{{display:flex;gap:7px;flex:1}}.navitem{{padding:11px 14px;border-radius:8px;font-size:13px;color:#dcecff}}.navitem.active{{background:rgba(50,139,229,.32);font-weight:800;color:white}}
+.hstatus{{display:flex;gap:10px;align-items:center}}.datebox,.readybox{{border:1px solid rgba(255,255,255,.25);border-radius:9px;padding:8px 12px;font-size:11px;line-height:1.35}}.datebox b,.readybox b{{font-size:12px}}.readybox{{background:#079455;border-color:#079455}}
+.hero{{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:17px 20px;box-shadow:var(--shadow);margin-bottom:12px}}.hero h1{{font-size:25px;margin:0;color:var(--text);letter-spacing:-.3px}}.hero p{{font-size:13px;color:var(--muted);margin:4px 0 0}}
+.sectionhead{{display:flex;align-items:center;justify-content:space-between;margin:0 0 9px}}.sectionhead h3{{font-size:15px;margin:0;color:var(--text)}}.eyebrow{{font-size:11px;color:var(--blue);font-weight:800;text-transform:uppercase;letter-spacing:.08em}}
+.info-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}}.info{{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px}}.info b{{display:block;font-size:18px;color:var(--text)}}.info span{{font-size:11px;color:var(--muted)}}
+.guard{{background:rgba(7,148,85,.10);border:1px solid rgba(7,148,85,.24);border-radius:9px;padding:10px 12px;color:var(--text);font-size:12px}}.guard b{{color:#079455}}
+.tipcard{{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:10px}}.tiprow{{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)}}.tiprow:last-child{{border:0}}.tipnum{{width:23px;height:23px;display:grid;place-items:center;border-radius:50%;background:rgba(20,115,230,.12);color:var(--blue);font-weight:800;flex:none}}
+[data-testid="stVerticalBlockBorderWrapper"]{{background:var(--surface);border-color:var(--border)!important;border-radius:12px!important;box-shadow:var(--shadow)}}
+label,p,.stMarkdown{{color:var(--text)}}
+.stTextInput input,.stTextArea textarea,[data-baseweb="select"]>div{{background:var(--surface2)!important;color:var(--text)!important;border-color:var(--border)!important}}
+.stTextArea textarea{{font-family:"Cascadia Mono",Consolas,monospace;font-size:12px;line-height:1.45}}
+[data-baseweb="tab-list"]{{gap:5px;background:var(--surface2);padding:5px;border:1px solid var(--border);border-radius:9px}}
+button[data-baseweb="tab"]{{height:34px;border-radius:7px;padding:0 12px;color:var(--muted)}}button[data-baseweb="tab"][aria-selected="true"]{{background:var(--blue)!important;color:white!important;font-weight:800}}
+[data-testid="stMetric"]{{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 11px}}[data-testid="stMetricLabel"]{{color:var(--muted)}}[data-testid="stMetricValue"]{{color:var(--text);font-size:20px}}
+.stButton>button{{border-radius:8px;border:1px solid var(--border);font-weight:750}}.stButton>button[kind="primary"]{{background:linear-gradient(180deg,#2383ee,#0d66cf);border:0;min-height:44px}}
+.flow{{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}}.flow>div{{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center;font-size:11px;color:var(--muted)}}.flow b{{display:block;color:var(--text);font-size:12px;margin-bottom:2px}}
+.sis-footer{{display:flex;justify-content:space-between;padding:13px 2px;color:var(--muted);font-size:10px}}
+@media(max-width:900px){{.brand{{min-width:auto}}.brandtext,.nav,.readybox{{display:none}}.sis-header{{gap:10px}}.hstatus{{margin-left:auto}}.info-grid,.flow{{grid-template-columns:1fr}}}}
+</style>"""
 
+st.markdown(_theme_css(st.session_state.sis_theme), unsafe_allow_html=True)
+market, market_sub, market_state = _market_label(); now = datetime.now()
 
-def _reason_text(code):
-    labels = {
-        "S3H_SWING_NOT_PASS": "Kualitas analisis Swing belum memenuhi seluruh syarat utama.",
-        "TECHNICAL_DATA_NOT_FRESH": "Data teknikal belum cukup mutakhir untuk keputusan eksekusi.",
-        "UNRESOLVED_TECHNICAL_CONTRADICTION": "Masih ada sinyal teknikal yang saling bertentangan.",
-        "TREND_NOT_BULL": "Tren harga belum menunjukkan struktur naik yang cukup kuat.",
-        "NO_DEFENSIBLE_RISK_BOUNDARY": "Batas risiko yang dapat dipertanggungjawabkan belum terbentuk.",
-        "RR_NOT_COMPUTABLE": "Rasio potensi hasil terhadap risiko belum dapat dihitung dengan andal.",
-        "CURRENT_RANGE_EXHAUSTED": "Rentang pergerakan saat ini sudah cukup lebar; mengejar harga meningkatkan risiko.",
-        "AVOID_CHASING_EXTENDED_PRICE": "Harga sudah terlalu jauh dari area referensi; lebih baik menunggu.",
-        "REWARD_RISK_BELOW_MINIMUM": "Potensi hasil dibanding risikonya belum memenuhi batas minimum.",
-        "EXECUTION_CONFIRMATION_WEAK": "Konfirmasi momentum/partisipasi pasar belum cukup kuat.",
-        "INSUFFICIENT_INTERNAL_EXECUTION_EVIDENCE": "Data internal belum cukup untuk menentukan rencana entry yang andal.",
-        "BROAD_BASED_FORWARD_IMPROVEMENT": "Ekspektasi pertumbuhan ke depan membaik secara luas.",
-        "FORWARD_REBOUND": "Terdapat indikasi pemulihan pada proyeksi ke depan.",
-        "STRUCTURAL_QUALITY_SUPPORT": "Kualitas fundamental struktural mendukung prospek jangka panjang.",
-        "SECTOR_SUPPORT": "Kondisi sektor memberi dukungan terhadap prospek.",
-        "FORWARD_DETERIORATION": "Proyeksi ke depan menunjukkan pelemahan.",
-        "MIXED_FORWARD_SIGNALS": "Proyeksi ke depan masih memberikan sinyal yang bercampur.",
-        "ELEVATED_RISK_CONTEXT": "Konteks risiko masih perlu diperhatikan.",
-        "VALUATION_PRESSURE": "Valuasi memberi tekanan terhadap daya tarik saat ini.",
-        "NO_FORWARD_GROWTH_EARNINGS": "Data proyeksi pertumbuhan/laba ke depan belum tersedia.",
-        "EXTREME_FORWARD_VALUE": "Sebagian proyeksi memiliki nilai ekstrem dan perlu kehati-hatian.",
-        "EPS_SPIKE_WITHOUT_OPERATING_SUPPORT": "Lonjakan EPS belum didukung perbaikan operasi yang sebanding.",
-        "NET_INCOME_SPIKE_WITHOUT_OPERATING_SUPPORT": "Lonjakan laba bersih belum didukung perbaikan operasi yang sebanding.",
-    }
-    return labels.get(str(code), str(code).replace("_", " ").capitalize())
+st.markdown(f'''<div class="sis-header"><div class="brand"><div class="brandmark">SIS</div><div class="brandtext"><b>Smart Investment Screener</b><small>Analisis hari ini, rencana untuk esok.</small></div></div><div class="nav"><div class="navitem">⌂ &nbsp;Beranda</div><div class="navitem active">▤ &nbsp;Input Data</div><div class="navitem">▥ &nbsp;Hasil Screening</div><div class="navitem">◷ &nbsp;Riwayat</div><div class="navitem">ⓘ &nbsp;Panduan</div></div><div class="hstatus"><div class="datebox">▣ &nbsp; Data penutupan yang dianalisis:<br><b>{now.strftime('%d %B %Y')}</b><br>({market})</div><div class="readybox">✓ &nbsp;<b>D1 Input & Snapshot</b><br>{market_sub}</div></div></div>''', unsafe_allow_html=True)
 
+head_l, head_r = st.columns([8.8,1.2], vertical_alignment="center")
+with head_l:
+    st.markdown('''<div class="hero"><div class="eyebrow">Fase D1 · Data Foundation</div><h1>Input Data & Snapshot SIS</h1><p>Masukkan hasil screening B1–B11. SIS hanya membuat snapshot resmi setelah data dan seluruh guard validasi dinyatakan aman.</p></div>''', unsafe_allow_html=True)
+with head_r:
+    st.button("☀ Light" if st.session_state.sis_theme == "dark" else "☾ Dark", on_click=_toggle_theme, use_container_width=True)
 
-def _package_for(packages, symbol):
-    return next((p for p in (packages or []) if str(p.get("ticker", "")).upper() == str(symbol).upper()), None)
+main, side = st.columns([2.15, .85], gap="medium")
 
-
-def _candidate_for(stage3, symbol):
-    return next((x for x in (stage3.get("candidates") or []) if str(x.get("symbol", "")).upper() == str(symbol).upper()), None)
-
-
-def _render_thesis_block(package, horizon):
-    if not package:
-        return
-    data = package.get(horizon) or {}
-    if not data:
-        return
-    if data.get("main_reasons"):
-        st.markdown("**Alasan utama**")
-        for item in data["main_reasons"]:
-            st.write(f"• {item}")
-    if data.get("key_contradictions"):
-        st.markdown("**Hal yang melemahkan analisis**")
-        for item in data["key_contradictions"]:
-            st.write(f"• {item}")
-    if data.get("key_risks"):
-        st.markdown("**Risiko utama**")
-        for item in data["key_risks"]:
-            st.write(f"• {item}")
-    if data.get("invalidation_condition"):
-        st.markdown("**Kapan analisis perlu dievaluasi ulang**")
-        for item in data["invalidation_condition"]:
-            st.write(f"• {item}")
-
-
-def _render_swing_detail(candidate, package):
-    syn = (candidate or {}).get("synthesis") or {}
-    sw = syn.get("swing") or {}
-    ex = (candidate or {}).get("swing_execution") or {}
-    status = ex.get("execution_status")
-    reasons = ex.get("reason_codes") or []
-    action = {
-        "READY": "SIAP BELI JIKA HARGA SESUAI",
-        "NOT_ATTRACTIVE": "JANGAN BELI DULU",
-        "INSUFFICIENT_DATA": "JANGAN BELI DULU",
-    }.get(status)
-    if status == "WAIT":
-        if "AVOID_CHASING_EXTENDED_PRICE" in reasons or "CURRENT_RANGE_EXHAUSTED" in reasons:
-            action = "TUNGGU HARGA"
+with side:
+    st.markdown('''<div class="tipcard"><div class="sectionhead"><h3>💡 Panduan Input</h3></div><div class="tiprow"><span class="tipnum">1</span><span><b>Input setelah market tutup</b><br>Gunakan data penutupan terbaru.</span></div><div class="tiprow"><span class="tipnum">2</span><span><b>B1–B11 harus satu sesi</b><br>Universe saham harus konsisten.</span></div><div class="tiprow"><span class="tipnum">3</span><span><b>Copy langsung dari Stockbit</b><br>Tidak perlu mengubah format manual.</span></div><div class="tiprow"><span class="tipnum">4</span><span><b>Guard tidak boleh dilewati</b><br>Data invalid tidak menjadi snapshot.</span></div></div>''', unsafe_allow_html=True)
+    history = list_snapshots(validated_only=True)
+    with st.container(border=True):
+        st.markdown("### ◷ Riwayat Snapshot")
+        st.caption("Hanya snapshot yang sudah tervalidasi.")
+        if not history:
+            st.info("Belum ada snapshot tervalidasi.")
         else:
-            action = "TUNGGU KONFIRMASI"
-    if not action:
-        action = _human_state(status)
-    st.markdown("**Saran SIS**")
-    st.write(f"**{action}**")
-    if reasons:
-        st.markdown("**Kenapa**")
-        for code in reasons:
-            st.write(f"• {_reason_text(code)}")
-    entry = ex.get("entry_area") or {}
-    st.markdown("**Rencana harga**")
-    if entry:
-        st.write(f"Area beli: {_fmt_price(entry.get('low'))} – {_fmt_price(entry.get('high'))}")
-        st.write(f"Target 1: {_fmt_price(ex.get('target_1'))} | Target 2: {_fmt_price(ex.get('target_2'))}")
-        st.write(f"Batas risiko: {_fmt_price(ex.get('risk_boundary'))}")
-        rr = ex.get("reward_risk") or {}
-        st.caption(f"Rasio Imbal Hasil/Risiko — Target 1: {rr.get('target_1', '—')} | Target 2: {rr.get('target_2', '—')}")
-    else:
-        st.info("Data saat ini belum cukup untuk menentukan area entry dan batas risiko yang andal.")
-    with st.expander("Lihat detail analisis", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Kualitas analisis", sw.get("quality", "—"))
-        c2.metric("Tingkat keyakinan", sw.get("confidence", "—"))
-        c3.metric("Status teknis", _human_state(status))
-        _render_thesis_block(package, "swing")
+            labels = {f'{x["created_at"][:16].replace("T"," ")} · {x["snapshot_id"][-10:]}': x["snapshot_id"] for x in history[:8]}
+            selected_history = st.selectbox("Snapshot", list(labels), label_visibility="collapsed")
+            if st.button("Muat Snapshot", use_container_width=True):
+                snap = load_snapshot(labels[selected_history])
+                for bi in range(1, 12): st.session_state[f"v2_b{bi}"] = get_snapshot_batch(snap, bi)
+                md = snap.get("metadata") or {}
+                if md.get("filter_fingerprint"): st.session_state["loaded_filter_fp"] = str(md["filter_fingerprint"])
+                _clear_analysis_state()
+                st.session_state["v2_snapshot_id"] = snap["snapshot_id"]
+                if result_exists(snap["snapshot_id"]):
+                    try:
+                        st.session_state["v2_stage3"] = load_analysis_result(snap["snapshot_id"])["stage3"]
+                    except Exception as exc:
+                        LOG.error("[D2] LOAD FAILED | id=%s | error=%s", snap["snapshot_id"], exc)
+                st.rerun()
+    st.markdown('''<div class="guard"><b>✓ Validated Snapshot Guard</b><br>Snapshot lama boleh digantikan hanya oleh data yang lolos pemeriksaan. Input invalid tidak dapat merusak snapshot valid.</div>''', unsafe_allow_html=True)
 
+with main:
+    with st.container(border=True):
+        st.markdown('<div class="sectionhead"><div><div class="eyebrow">Screening Source</div><h3>Data Screening B1–B11</h3></div></div>', unsafe_allow_html=True)
+        filter_fp = st.text_input("Label sesi screening", value=st.session_state.get("loaded_filter_fp", "S0-6FILTER"), help="Identitas screening yang menjadi bagian dari snapshot.")
+        raw_inputs, parsed, issues_by_batch = {}, {}, {}
+        tabs = st.tabs([f"B{i}" for i in range(1, 12)])
+        for i, tab in enumerate(tabs, 1):
+            with tab:
+                text = st.text_area(f"Data B{i}", height=230, key=f"v2_b{i}", placeholder=f"Tempel hasil screening Stockbit B{i} di sini…")
+                raw_inputs[i] = text
+                if text.strip():
+                    df, parse_issues = parse_clipboard_text(text, batch_id=i)
+                    schema_issues = validate_batch(df, i) if not parse_issues else []
+                    all_issues = list(parse_issues) + list(schema_issues)
+                    if all_issues:
+                        issues_by_batch[i] = all_issues; st.error("Data B%d belum valid." % i)
+                        for item in dict.fromkeys(_friendly(x) for x in all_issues): st.caption("• " + item)
+                    else:
+                        parsed[i] = df; st.success(f"B{i} valid · {len(df)} saham terbaca")
+                else:
+                    st.caption(f"B{i} belum diisi.")
 
-def _longterm_decision_label(candidate):
-    syn = (candidate or {}).get("synthesis") or {}
-    base = syn.get("long_term") or {}
-    lt = (candidate or {}).get("longterm_outlook") or {}
-    if base.get("analytical_status") != "PASS" or lt.get("status") != "COMPLETE":
-        return "BELUM LAYAK"
-    dca = lt.get("dca_context")
-    o3 = ((lt.get("outlook") or {}).get("3Y") or {}).get("state")
-    valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
-    risk = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("RISK") or {}).get("state", "UNKNOWN")
-    if risk == "NEGATIVE_STRONG" or o3 == "NEGATIVE":
-        return "BELUM LAYAK"
-    if dca == "FAVORABLE" and o3 in {"POSITIVE", "STABLE"} and valuation not in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
-        return "LAYAK DIBELI"
-    if valuation in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
-        return "BAGUS, TUNGGU HARGA"
-    return "PERTIMBANGKAN / TUNGGU"
-
-
-def _longterm_price_label(candidate):
-    syn = (candidate or {}).get("synthesis") or {}
-    valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
-    return {
-        "POSITIVE_STRONG": "Murah / diskon",
-        "POSITIVE_MODERATE": "Menarik",
-        "NEUTRAL": "Wajar",
-        "NEGATIVE_MODERATE": "Agak mahal",
-        "NEGATIVE_STRONG": "Mahal",
-        "UNKNOWN": "Belum dapat dinilai",
-    }.get(valuation, "Belum dapat dinilai")
-
-
-
-def _longterm_summary_fields(candidate):
-    syn = (candidate or {}).get("synthesis") or {}
-    lt = (candidate or {}).get("longterm_outlook") or {}
-    evidence = ((syn.get("shared") or {}).get("evidence_ledger") or {})
-
-    out = lt.get("outlook") or {}
-    s1 = ((out.get("1Y") or {}).get("state"))
-    s3 = ((out.get("3Y") or {}).get("state"))
-    s5 = ((out.get("5Y") or {}).get("state"))
-    states = [s for s in (s1, s3, s5) if s]
-    if not states:
-        prospect = "Belum cukup data"
-    elif s3 == "NEGATIVE" or s5 == "NEGATIVE":
-        prospect = "Negatif"
-    elif s3 == "POSITIVE" and s5 == "POSITIVE":
-        prospect = "Positif"
-    elif s3 in {"POSITIVE", "STABLE"} and s5 in {"POSITIVE", "STABLE"}:
-        prospect = "Stabil"
-    else:
-        prospect = "Hati-hati"
-
-    business_domain = (candidate or {}).get("dossier", {}).get("domains", {}).get("business", {})
-    business_state = business_domain.get("state", "NOT_EVALUATED") if isinstance(business_domain, dict) else "NOT_EVALUATED"
-    business = {
-        "STRONG": "Baik",
-        "MIXED": "Cukup",
-        "WEAK": "Perlu perhatian",
-        "NOT_EVALUATED": "Belum cukup data",
-    }.get(business_state, "Belum cukup data")
-
-    risk_state = (evidence.get("RISK") or {}).get("state", "UNKNOWN")
-    risk = {
-        "POSITIVE_STRONG": "Rendah",
-        "POSITIVE_MODERATE": "Relatif rendah",
-        "NEUTRAL": "Normal",
-        "NEGATIVE_MODERATE": "Moderat",
-        "NEGATIVE_STRONG": "Tinggi",
-        "UNKNOWN": "Belum cukup data",
-    }.get(risk_state, "Belum cukup data")
-
-    accumulation = {
-        "FAVORABLE": "Mendukung",
-        "NORMAL": "Normal",
-        "CAUTIOUS": "Hati-hati",
-    }.get(lt.get("dca_context"), "Belum cukup data")
-
-    return {"prospect": prospect, "business": business, "risk": risk, "accumulation": accumulation}
-
-
-def _render_longterm_detail(candidate, package):
-    syn = (candidate or {}).get("synthesis") or {}
-    base = syn.get("long_term") or {}
-    lt = (candidate or {}).get("longterm_outlook") or {}
-    risk = ((syn.get("shared") or {}).get("risk_families") or {}).get("RISK", {}).get("state")
-    summary = _longterm_summary_fields(candidate)
-    action = _longterm_decision_label(candidate)
-
-    st.markdown("**Ringkasan keputusan**")
-    c1, c2 = st.columns(2)
-    c1.metric("Prospek jangka panjang", summary.get("prospect"))
-    c1.metric("Kualitas bisnis", summary.get("business"))
-    c2.metric("Risiko", summary.get("risk"))
-    c2.metric("Konteks akumulasi", summary.get("accumulation"))
-
-    st.markdown("**Saran SIS**")
-    st.write(f"**{action}**")
-
-    if action != "LAYAK DIBELI":
-        st.markdown("**Apa yang menahan keputusan?**")
-        blockers = []
-        if summary.get("accumulation") == "Hati-hati":
-            blockers.append("Konteks akumulasi masih hati-hati.")
-        if summary.get("risk") in {"Moderat", "Tinggi"}:
-            blockers.append(f"Risiko masih berada pada tingkat {summary.get('risk').lower()}.")
-        valuation = (((syn.get("shared") or {}).get("evidence_ledger") or {}).get("VALUATION") or {}).get("state", "UNKNOWN")
-        if valuation in {"NEGATIVE_MODERATE", "NEGATIVE_STRONG"}:
-            blockers.append("Valuasi belum cukup mendukung untuk keputusan beli.")
-        if not blockers:
-            blockers.append("Bukti yang tersedia belum cukup kuat untuk meningkatkan keputusan menjadi Layak Dibeli.")
-        for item in blockers:
-            st.write(f"• {item}")
-
-    out = lt.get("outlook") or {}
-    st.markdown("**Prospek rinci**")
-    cols = st.columns(3)
-    for col, horizon, label in zip(cols, ("1Y", "3Y", "5Y"), ("1 Tahun", "3 Tahun", "5 Tahun")):
-        x = out.get(horizon) or {}
-        col.metric(f"Prospek {label}", _human_state(x.get("state")), f"Keyakinan {x.get('confidence', '—')}")
-    drivers = lt.get("forward_drivers") or []
-    risks = lt.get("forward_risks") or []
-    if drivers:
-        st.markdown("**Faktor pendukung**")
-        for code in drivers:
-            st.write(f"• {_reason_text(code)}")
-    if risks:
-        st.markdown("**Risiko utama**")
-        for code in risks:
-            st.write(f"• {_reason_text(code)}")
-    with st.expander("Lihat detail analisis", expanded=False):
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Kualitas analisis", base.get("quality", "—"))
-        c2.metric("Tingkat keyakinan", base.get("confidence", "—"))
-        c3.metric("Risiko", _human_state(risk))
-        c4.metric("Konteks akumulasi", _human_state(lt.get("dca_context")))
-        _render_thesis_block(package, "long_term")
-        fwd = lt.get("forward_evidence") or {}
-        if fwd:
-            st.markdown("**Data pendukung prospek**")
-            consistency_labels = {"BROAD_IMPROVEMENT": "Membaik secara luas", "Broad Improvement": "Membaik secara luas"}
-            raw_consistency = fwd.get("consistency")
-            st.write(f"Konsistensi proyeksi: {consistency_labels.get(str(raw_consistency), _human_state(raw_consistency))}")
-            st.write(f"Cakupan data pendukung: {round(float(fwd.get('coverage', 0))*100)}%")
-            val = fwd.get("valuation_context") or {}
-            st.write(f"Estimasi laba per saham ke depan (EPS): {_fmt_price(val.get('eps_forward'))} | Rasio PEG ke depan: {_fmt_price(val.get('peg_forward'))}")
-
-
-def render_final_results(result, packages):
-    if not isinstance(result, dict) or result.get("status") != "COMPLETE":
-        st.error("Analisis belum dapat diselesaikan.")
-        return
-    stage3 = result.get("stage3") or {}
-    ranking = stage3.get("ranking") or {}
-    swing = ranking.get("swing") or {}
-    long_term = ranking.get("long_term") or {}
-    candidates = stage3.get("candidates") or []
-
-    st.subheader("Hasil Analisis SIS")
-    counts = result.get("counts") or {}
-    st.caption(f"{counts.get('p10', 0)} saham selesai dianalisis. Pemeriksaan, analisis, dan pemeringkatan dijalankan otomatis di background.")
-
-    # Power Screener funnel: presentation only; Stage 3 remains the analytical source of truth.
-    def _select_funnel_symbol(symbol, horizon):
-        if horizon == "swing":
-            st.session_state["final_swing_symbol"] = symbol
-        else:
-            st.session_state["final_lt_symbol"] = symbol
-
-    render_opportunity_funnel(st, stage3, on_symbol=_select_funnel_symbol)
-    st.divider()
-    st.markdown("### Analisis Lengkap per Saham")
-
-    swing_tab, lt_tab = st.tabs(["Swing", "Jangka Panjang"])
-    with swing_tab:
-        top = swing.get("top") or []
-        watch = swing.get("watch") or []
-        if not top:
-            st.info("Belum ada kandidat Swing yang memenuhi seluruh kriteria untuk siap dipertimbangkan pada snapshot ini.")
-        options = []
-        labels = {}
-        for row in top:
-            sym = row.get("symbol")
-            options.append(sym); labels[sym] = f"#{row.get('rank')} {sym} — Siap dipertimbangkan"
-        for row in watch:
-            sym = row.get("symbol")
-            if sym not in labels:
-                options.append(sym); labels[sym] = f"{sym} — {_human_state(row.get('execution_status'))}"
-        for candidate in candidates:
-            sym = candidate.get("symbol")
-            if sym and sym not in labels:
-                options.append(sym)
-                labels[sym] = f"{sym} — Semua saham lain tetap dapat dibuka"
-        if options:
-            selected = st.selectbox("Pilih saham untuk melihat analisis Swing", options, format_func=lambda x: labels.get(x, x), key="final_swing_symbol")
-            cand = _candidate_for(stage3, selected)
-            st.subheader(f"{selected} — Analisis Swing", anchor=False)
-            _render_swing_detail(cand, _package_for(packages, selected))
-        else:
-            st.caption("Belum ada kandidat Swing yang dapat ditampilkan.")
-
-    with lt_tab:
-        top = long_term.get("top") or []
-        if not top:
-            st.info("Belum ada kandidat Jangka Panjang yang memenuhi kriteria ranking pada snapshot ini.")
-        labels = {row.get("symbol"): f"#{row.get('rank')} {row.get('symbol')} — Analisis jangka panjang" for row in top}
-        lt_options = [row.get("symbol") for row in top if row.get("symbol")]
-        for candidate in candidates:
-            sym = candidate.get("symbol")
-            if sym and sym not in labels:
-                lt_options.append(sym)
-                labels[sym] = f"{sym} — Lihat analisis lengkap"
-        if lt_options:
-            selected = st.selectbox("Pilih saham untuk melihat analisis Jangka Panjang", lt_options, format_func=lambda x: labels.get(x, x), key="final_lt_symbol")
-            cand = _candidate_for(stage3, selected)
-            st.subheader(f"{selected} — Analisis Jangka Panjang", anchor=False)
-            _render_longterm_detail(cand, _package_for(packages, selected))
-
-    st.caption("Kualitas analisis menunjukkan kekuatan kandidat berdasarkan data pendukung. Tingkat keyakinan menunjukkan seberapa yakin SIS terhadap penilaian tersebut. Keduanya dinilai terpisah dan tidak digabungkan menjadi satu nilai akhir.")
-
-
-st.title("SIS — Stock Intelligence System")
-st.caption("Masukkan hasil screening, lalu jalankan analisis. Pemeriksaan dan penyiapan data dilakukan otomatis di background.")
-st.info("📌 Input data B1–B11 wajib dilakukan setelah market tutup agar data antarbagian berasal dari kondisi pasar yang sama dan mengurangi ketidaksesuaian data input.")
-
-filter_fp = st.text_input("Label sesi screening", value="S0-6FILTER")
-
-with st.expander("Riwayat Input", expanded=False):
-    history = list_snapshots()
-    if history:
-        labels = {f'{x["created_at"][:19].replace("T", " ")} | {x["status"]} | {x["snapshot_id"][-12:]}': x["snapshot_id"] for x in history}
-        sel = st.selectbox("Pilih riwayat data", list(labels.keys()))
-        if st.button("Muat Riwayat"):
-            snap = load_snapshot(labels[sel])
-            for bi in range(1, 12):
-                st.session_state[f"paste_b{bi}"] = get_snapshot_batch(snap, bi)
-            metadata = snap.get("metadata") or {}
-            if metadata.get("expected_total"):
-                st.session_state["loaded_expected_total"] = int(metadata["expected_total"])
-            if metadata.get("filter_fingerprint"):
-                st.session_state["loaded_filter_fp"] = str(metadata["filter_fingerprint"])
-            st.rerun()
-    else:
-        st.caption("Belum ada riwayat input.")
-
-raw_inputs = {}
-parsed = {}
-input_issues = []
-with st.expander("Data Screening B1–B11", expanded=True):
-    tabs = st.tabs([f"B{i}" for i in range(1, 12)])
-    for i, tab in enumerate(tabs, 1):
-        with tab:
-            text = st.text_area(f"Data B{i}", height=180, key=f"paste_b{i}")
-            raw_inputs[i] = text
-            if not text.strip():
-                continue
-            df, issues = parse_clipboard_text(text)
-            schema_issues = validate_batch(df, i) if not issues else []
-            all_issues = list(issues) + list(schema_issues)
-            if all_issues:
-                input_issues.extend(all_issues)
-                st.warning("Data pada bagian ini perlu diperiksa sebelum analisis dijalankan.")
-            else:
-                parsed[i] = df
-                st.caption(f"Data terbaca: {len(df)} saham")
-
-# Jumlah saham ditentukan otomatis dari universe B1.
-# Kesamaan universe B1-B11 tetap divalidasi secara strict oleh Stage 1.
-expected_total = len(parsed[1]) if 1 in parsed else 0
-
-c_save, c_run = st.columns([1, 2])
-with c_save:
-    if st.button("Simpan ke Riwayat", use_container_width=True):
-        if all(raw_inputs.get(i, "").strip() for i in range(1, 12)):
-            snap = save_snapshot(raw_inputs, metadata={"expected_total": int(expected_total), "filter_fingerprint": filter_fp})
-            st.success(f'Input tersimpan ({snap["snapshot_id"][-12:]}).')
-        else:
-            st.warning("Lengkapi B1–B11 sebelum menyimpan.")
-
-with c_run:
-    run_clicked = st.button("Run Analysis", type="primary", use_container_width=True)
+        filled = sum(bool(raw_inputs.get(i, "").strip()) for i in range(1, 12))
+        valid_batches = len(parsed); expected_total = _peer_universe_total(parsed)
+        st.markdown('<div class="info-grid">' +
+            f'<div class="info"><b>{filled}/11</b><span>Data terisi</span></div>' +
+            f'<div class="info"><b>{valid_batches}/11</b><span>Lolos pemeriksaan awal</span></div>' +
+            f'<div class="info"><b>{expected_total if expected_total else "—"}</b><span>Universe saham</span></div></div>', unsafe_allow_html=True)
+        if filled < 11: st.warning("Lengkapi B1–B11. Snapshot resmi belum dapat dibuat.")
+        elif issues_by_batch: st.error("Ada batch yang belum valid. Perbaiki bagian yang ditandai sebelum diproses.")
+        else: st.success("B1–B11 lolos pemeriksaan awal. Siap untuk validasi silang dan analisis SIS.")
+        run_clicked = st.button("▶  VALIDASI & PROSES DATA", type="primary", use_container_width=True, disabled=not (filled == 11 and valid_batches == 11))
+        st.caption("🔒 Snapshot resmi tersimpan otomatis segera setelah Stage 1 PASS. Status analisis diperbarui pada snapshot yang sama saat Stage 2/P10/Stage 3 berjalan.")
 
 if run_clicked:
-    st.session_state.pop("analysis_packages", None)
-    st.session_state.pop("stage3_result", None)
-    if not all(raw_inputs.get(i, "").strip() for i in range(1, 12)):
-        render_notice("Analisis belum dapat dijalankan", ["Lengkapi seluruh bagian data B1–B11 terlebih dahulu."])
-    elif input_issues:
-        render_notice("Ada data yang perlu diperiksa", [friendly_input_issue(x) for x in input_issues])
-    elif len(parsed) != 11:
-        render_notice("Analisis belum dapat dijalankan", ["Sebagian data belum berhasil disiapkan. Periksa kembali B1–B11."])
-    else:
-        with st.status("Menjalankan analisis SIS…", expanded=True) as status:
-            st.write("Memeriksa kelengkapan dan konsistensi data…")
-            s1 = run_stage1(parsed, expected_total=int(expected_total), filter_fingerprint=filter_fp)
-            if s1["status"] != "PASS":
-                status.update(label="Analisis dihentikan — data perlu diperiksa", state="error")
-                st.session_state["analysis_blocked"] = [friendly_stage1_issue(x) for x in s1.get("issues", [])]
+    _clear_analysis_state()
+    LOG.info("[RUN] START | expected_total=%d | filter=%s | batches=%d", int(expected_total), filter_fp, len(parsed))
+    with st.status("SIS sedang memvalidasi data…", expanded=True) as status:
+        st.write("1/4 · Validasi silang B1–B11")
+        LOG.info("[S1] START | cross-validation B1-B11")
+        s1 = run_stage1(parsed, expected_total=int(expected_total), filter_fingerprint=filter_fp)
+        LOG.info("[S1] END | status=%s | issues=%d | canonical_rows=%d", s1.get("status"), len(s1.get("issues", [])), len(s1.get("canonical", [])))
+        if s1.get("status") != "PASS":
+            _log_issues("S1", s1.get("issues", []))
+            LOG.error("[RUN] STOP | Stage2/Stage3 NOT EXECUTED")
+            st.session_state["v2_blocked"] = [_friendly(x) for x in s1.get("issues", [])]
+            status.update(label="Dihentikan — data belum valid", state="error")
+        else:
+            LOG.info("[SNAPSHOT] AUTO-SAVE START | trigger=S1_PASS")
+            snap = save_validated_snapshot(raw_inputs, canonical=s1["canonical"], validation_status=s1["status"], metadata={"expected_total": int(expected_total), "filter_fingerprint": filter_fp, "analysis_status": "PENDING", "analysis_as_of": date.today().isoformat()})
+            st.session_state["v2_snapshot_id"] = snap["snapshot_id"]
+            LOG.info("[SNAPSHOT] AUTO-SAVED | id=%s | analysis_status=%s", snap["snapshot_id"], (snap.get("metadata") or {}).get("analysis_status"))
+            st.write("2/4 · Snapshot valid tersimpan otomatis · Analisis Stage 2")
+            LOG.info("[S2] START | canonical_rows=%d", len(s1["canonical"]))
+            s2 = run_stage2(s1["canonical"])
+            LOG.info("[S2] END | status=%s | packages=%d", s2.status, len(s2.packages))
+            if s2.status != "PASS":
+                LOG.error("[S2] BLOCKED | status=%s", s2.status)
+                LOG.error("[RUN] STOP | Stage3 NOT EXECUTED")
+                update_snapshot_analysis(snap["snapshot_id"], "S2_BLOCKED")
+                LOG.warning("[SNAPSHOT] STATUS | id=%s | analysis_status=S2_BLOCKED", snap["snapshot_id"])
+                st.session_state["v2_blocked"] = ["Analisis Stage 2 belum selesai dengan aman. Snapshot input valid tetap tersimpan."]
+                status.update(label="Dihentikan — Stage 2 belum PASS", state="error")
             else:
-                st.write("Menyiapkan data untuk analisis…")
-                st.write("Menganalisis kandidat Swing dan Jangka Panjang…")
-                s2 = run_stage2(s1["canonical"])
-                if s2.status != "PASS":
-                    status.update(label="Analisis belum dapat diselesaikan", state="error")
-                    st.session_state["analysis_blocked"] = ["SIS belum dapat menyelesaikan analisis untuk seluruh saham. Silakan jalankan kembali atau periksa input."]
+                st.write("3/4 · Analisis dan ranking Stage 3")
+                s3 = _run_stage3(s1["canonical"], s2.packages, date.today().isoformat())
+                if s3.get("status") != "COMPLETE":
+                    _log_issues("S3", s3.get("diagnostics", []))
+                    blocked_stage = "P10_BLOCKED" if s3.get("blocked_stage") == "P10" else "S3_BLOCKED"
+                    update_snapshot_analysis(snap["snapshot_id"], blocked_stage, metadata_updates={"stage3_diagnostics": s3.get("diagnostics", [])})
+                    LOG.error("[RUN] STOP | validated snapshot retained | id=%s", snap["snapshot_id"])
+                    st.session_state["v2_blocked"] = ["Analisis Stage 3 belum COMPLETE. Snapshot input valid tetap tersimpan."]
+                    status.update(label="Dihentikan — Stage 3 belum COMPLETE", state="error")
                 else:
-                    st.session_state["analysis_packages"] = s2.packages
-                    st.write("Menyelesaikan analisis dan pemeringkatan…")
-                    from datetime import date
-                    s3_result = run_stage3_from_current_analysis(
-                        s1["canonical"], s2.packages, analysis_as_of=date.today().isoformat(), top_n=3
-                    )
-                    if s3_result.get("status") != "COMPLETE":
-                        status.update(label="Analisis belum dapat diselesaikan", state="error")
-                        st.session_state["analysis_blocked"] = ["SIS belum dapat menyelesaikan seluruh analisis. Silakan jalankan kembali atau periksa input."]
-                    else:
-                        st.session_state["stage3_result"] = s3_result
-                        st.session_state.pop("analysis_blocked", None)
-                        status.update(label="Analisis selesai", state="complete", expanded=False)
+                    st.write("4/4 · Simpan hasil analisis dan finalisasi snapshot")
+                    LOG.info("[D2] RESULT SAVE START | id=%s", snap["snapshot_id"])
+                    try:
+                        saved_result = save_analysis_result(snap["snapshot_id"], s3, date.today().isoformat())
+                        LOG.info("[D2] RESULT SAVED | id=%s | digest=%s", snap["snapshot_id"], saved_result.get("stage3_digest"))
+                    except Exception as exc:
+                        LOG.exception("[D2] RESULT SAVE FAILED | id=%s", snap["snapshot_id"])
+                        update_snapshot_analysis(snap["snapshot_id"], "S3_BLOCKED", metadata_updates={"result_persistence_error": str(exc)})
+                        st.session_state["v2_blocked"] = ["Analisis selesai, tetapi hasil belum dapat disimpan dengan aman. Snapshot input valid tetap tersimpan."]
+                        status.update(label="Dihentikan — hasil analisis belum tersimpan", state="error")
+                        st.stop()
+                    snap = update_snapshot_analysis(snap["snapshot_id"], "COMPLETE", metadata_updates={"analysis_as_of": date.today().isoformat(), "stage2_status": s2.status, "stage3_status": s3.get("status"), "stage3_candidate_count": s3.get("candidate_count"), "stage3_blocked_count": len(s3.get("blocked", [])), "result_persisted": True, "result_digest": saved_result.get("stage3_digest")})
+                    st.session_state["v2_stage1"] = s1; st.session_state["v2_packages"] = s2.packages; st.session_state["v2_stage3"] = s3; st.session_state["v2_snapshot_id"] = snap["snapshot_id"]
+                    LOG.info("[SNAPSHOT] FINALIZED | id=%s | analysis_status=COMPLETE", snap["snapshot_id"])
+                    LOG.info("[RUN] COMPLETE | S1=PASS | S2=PASS | S3=COMPLETE")
+                    status.update(label="Data valid · analisis selesai · snapshot resmi siap", state="complete", expanded=False)
 
-if st.session_state.get("analysis_blocked"):
-    render_notice("Data perlu diperiksa sebelum analisis dilanjutkan", st.session_state["analysis_blocked"])
+if st.session_state.get("v2_blocked"):
+    if st.session_state.get("v2_snapshot_id"):
+        st.error("Analisis dihentikan, tetapi snapshot input yang sudah tervalidasi tetap tersimpan.")
+    else:
+        st.error("Proses dihentikan. Snapshot resmi tidak dibuat karena Stage 1 belum PASS.")
+    for msg in dict.fromkeys(st.session_state["v2_blocked"]): st.write("• " + msg)
+if st.session_state.get("v2_snapshot_id"):
+    st.success("Snapshot tervalidasi berhasil disiapkan.")
+    a, b, c = st.columns(3); a.metric("Status", "VALIDATED"); b.metric("Saham", expected_total); c.metric("Snapshot", st.session_state["v2_snapshot_id"][-10:])
 
-if "stage3_result" in st.session_state:
-    st.divider()
-    render_final_results(st.session_state["stage3_result"], st.session_state.get("analysis_packages", []))
+if st.session_state.get("v2_stage3"):
+    st.markdown("---")
+    def _open_result_symbol(symbol, horizon):
+        st.session_state["v2_detail_symbol"] = symbol
+        st.session_state["v2_detail_horizon"] = horizon
+    render_opportunity_funnel(st, st.session_state["v2_stage3"], on_symbol=_open_result_symbol)
+    if st.session_state.get("v2_detail_symbol"):
+        render_stock_detail(st, st.session_state["v2_stage3"], st.session_state["v2_detail_symbol"], st.session_state.get("v2_detail_horizon", "swing"))
+
+with st.container(border=True):
+    st.markdown('<div class="sectionhead"><h3>Alur Proses Background</h3><span class="eyebrow">Fail Closed</span></div><div class="flow"><div><b>1 · Parsing</b>Baca B1–B11</div><div><b>2 · Validasi</b>Guard & konsistensi</div><div><b>3 · Snapshot</b>Auto-save setelah S1 PASS</div><div><b>4 · Analisis</b>Stage 2 → P10 → 3</div><div><b>5 · Hasil</b>Siap untuk D2</div></div>', unsafe_allow_html=True)
+
+st.markdown('<div class="sis-footer"><span><b>SIS</b> · Smart Investment Screener &nbsp; | &nbsp; Analisis berbasis data penutupan. Bukan ajakan jual beli saham.</span><span>Investasi yang baik dimulai dari informasi yang tepat.</span></div>', unsafe_allow_html=True)
