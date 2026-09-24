@@ -1,9 +1,12 @@
 from __future__ import annotations
-import json, hashlib, math, os, tempfile
+import json, hashlib, math, os
 from datetime import datetime
 from pathlib import Path
+from storage_adapter import JsonStore
+
 HISTORY_VERSION=6
 VALIDATED_STATUS="VALIDATED"
+_NAMESPACE="input_history"
 
 def _find_sis_root(here):
     for parent in Path(here).parents:
@@ -11,24 +14,23 @@ def _find_sis_root(here):
             return parent
     return None
 
-def _default_history_root():
-    # Production contract: when SIS is installed anywhere below a directory
-    # named "SIS" (for example D:\\SIS\\SIS_NEW\\<build>), validated
-    # snapshots live outside the versioned build at SIS_DATA/input_history.
-    # SIS_DATA_DIR can override this location explicitly.
+def _data_root():
     override=os.environ.get("SIS_DATA_DIR", "").strip()
     if override:
-        return Path(override).expanduser()/"input_history"
+        return Path(override).expanduser()
     here=Path(__file__).resolve()
     sis_root=_find_sis_root(here)
     if sis_root is not None:
-        return sis_root/"SIS_DATA"/"input_history"
-    # Portable/dev fallback keeps the existing repository-local behaviour.
-    return here.parents[1]/"data"/"input_history"
+        return sis_root/"SIS_DATA"
+    return here.parents[1]/"data"
 
-def _root(base_dir=None):
-    p=Path(base_dir) if base_dir else _default_history_root()
-    p.mkdir(parents=True,exist_ok=True);return p
+def _default_history_root():
+    return _data_root()/_NAMESPACE
+
+def _store(base_dir=None):
+    if base_dir is not None:
+        return JsonStore(Path(base_dir).parent if Path(base_dir).name==_NAMESPACE else Path(base_dir))
+    return JsonStore(_data_root())
 
 def _clean_batches(raw_batches):return {str(i):str(raw_batches.get(i,raw_batches.get(str(i),""))) for i in range(1,12)}
 
@@ -81,49 +83,39 @@ def _context_digest(metadata):
     identity={"filter_fingerprint":m.get("filter_fingerprint"),"expected_total":m.get("expected_total")}
     return hashlib.sha256(json.dumps(identity,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=_json_scalar).encode()).hexdigest()
 
-def _atomic_write_json(path,payload):
-    path=Path(path);fd,tmp=tempfile.mkstemp(prefix=path.name+".",suffix=".tmp",dir=str(path.parent),text=True)
-    try:
-        with os.fdopen(fd,"w",encoding="utf-8") as f:
-            json.dump(payload,f,ensure_ascii=False,indent=2,default=_json_scalar);f.flush();os.fsync(f.fileno())
-        os.replace(tmp,path)
-    except Exception:
-        try:os.unlink(tmp)
-        except OSError:pass
-        raise
-
 def save_snapshot(raw_batches,status="INPUT_CAPTURED",base_dir=None,now=None,metadata=None):
-    """Legacy v1 capture API retained for regression compatibility only."""
     clean=_clean_batches(raw_batches)
     if not all(clean[str(i)].strip() for i in range(1,12)):raise ValueError("HISTORY_REQUIRES_B1_B11")
     ts=now or datetime.now().astimezone();core={"version":HISTORY_VERSION,"created_at":ts.isoformat(),"status":status,"raw_batches":clean,"metadata":metadata or{}}
     digest=hashlib.sha256(json.dumps(core,ensure_ascii=False,sort_keys=True,default=_json_scalar).encode()).hexdigest()[:12]
-    sid=ts.strftime("%Y%m%d_%H%M%S_%f")+"_"+digest;payload={"snapshot_id":sid,**core};_atomic_write_json(_root(base_dir)/(sid+".json"),payload);return payload
+    sid=ts.strftime("%Y%m%d_%H%M%S_%f")+"_"+digest;payload={"snapshot_id":sid,**core}
+    _store(base_dir).put(_NAMESPACE,sid,payload)
+    return payload
 
 def save_validated_snapshot(raw_batches,canonical,validation_status,base_dir=None,now=None,metadata=None):
     clean=_clean_batches(raw_batches)
     if not all(clean[str(i)].strip() for i in range(1,12)):raise ValueError("HISTORY_REQUIRES_B1_B11")
     if validation_status!="PASS" or canonical is None:raise ValueError("HISTORY_REQUIRES_VALIDATED_STAGE1")
-    m=dict(metadata or{})
-    m.setdefault("analysis_status","PENDING")
-    records=_validate_canonical(canonical,m);digest=_canonical_digest(records);context_digest=_context_digest(m);root=_root(base_dir)
-    for p in root.glob("*.json"):
-        try:old=json.loads(p.read_text(encoding="utf-8"))
-        except Exception:continue
+    m=dict(metadata or{});m.setdefault("analysis_status","PENDING")
+    records=_validate_canonical(canonical,m);digest=_canonical_digest(records);context_digest=_context_digest(m)
+    store=_store(base_dir)
+    for old in store.list(_NAMESPACE):
         if old.get("status")==VALIDATED_STATUS and old.get("canonical_digest")==digest and old.get("context_digest")==context_digest:return old
     ts=now or datetime.now().astimezone();core={"version":HISTORY_VERSION,"created_at":ts.isoformat(),"status":VALIDATED_STATUS,"canonical_digest":digest,"context_digest":context_digest,"raw_batches":clean,"metadata":m}
-    sid=ts.strftime("%Y%m%d_%H%M%S_%f")+"_"+digest[:8]+context_digest[:4];payload={"snapshot_id":sid,**core};_atomic_write_json(root/(sid+".json"),payload);return payload
+    sid=ts.strftime("%Y%m%d_%H%M%S_%f")+"_"+digest[:8]+context_digest[:4];payload={"snapshot_id":sid,**core}
+    store.put(_NAMESPACE,sid,payload)
+    return payload
 
 def update_snapshot_analysis(snapshot_id,analysis_status,base_dir=None,metadata_updates=None):
     if not snapshot_id or "/" in snapshot_id or "\\" in snapshot_id or ".." in snapshot_id:raise ValueError("INVALID_SNAPSHOT_ID")
-    path=_root(base_dir)/(snapshot_id+".json");x=json.loads(path.read_text(encoding="utf-8"))
+    store=_store(base_dir);x=store.get(_NAMESPACE,snapshot_id)
     if x.get("snapshot_id")!=snapshot_id or x.get("status")!=VALIDATED_STATUS:raise ValueError("INVALID_VALIDATED_SNAPSHOT")
     allowed={"PENDING","S2_BLOCKED","P10_BLOCKED","S3_BLOCKED","COMPLETE"}
     if analysis_status not in allowed:raise ValueError("INVALID_ANALYSIS_STATUS")
     m=dict(x.get("metadata") or {});m["analysis_status"]=analysis_status
     for k,v in dict(metadata_updates or {}).items():
         if k not in {"expected_total","filter_fingerprint"}:m[k]=v
-    x["metadata"]=m;_atomic_write_json(path,x);return x
+    x["metadata"]=m;store.put(_NAMESPACE,snapshot_id,x);return x
 
 def _valid_v6_record(x):
     if x.get("version")!=HISTORY_VERSION or x.get("status")!=VALIDATED_STATUS:return True
@@ -131,18 +123,17 @@ def _valid_v6_record(x):
 
 def list_snapshots(base_dir=None,validated_only=False):
     out=[]
-    for p in sorted(_root(base_dir).glob("*.json"),reverse=True):
+    for x in _store(base_dir).list(_NAMESPACE):
         try:
-            x=json.loads(p.read_text(encoding="utf-8"))
             if not _valid_v6_record(x):continue
             if validated_only and x.get("status")!=VALIDATED_STATUS:continue
-            out.append({"snapshot_id":x["snapshot_id"],"created_at":x["created_at"],"status":x.get("status",""),"path":str(p)})
+            out.append({"snapshot_id":x["snapshot_id"],"created_at":x["created_at"],"status":x.get("status",""),"path":None})
         except Exception:continue
     return out
 
 def load_snapshot(snapshot_id,base_dir=None):
     if not snapshot_id or "/" in snapshot_id or "\\" in snapshot_id or ".." in snapshot_id:raise ValueError("INVALID_SNAPSHOT_ID")
-    x=json.loads((_root(base_dir)/(snapshot_id+".json")).read_text(encoding="utf-8"))
+    x=_store(base_dir).get(_NAMESPACE,snapshot_id)
     if x.get("snapshot_id")!=snapshot_id or x.get("version") not in {1,2,3,4,5,HISTORY_VERSION}:raise ValueError("INVALID_SNAPSHOT")
     if not _valid_v6_record(x):raise ValueError("INVALID_VALIDATED_SNAPSHOT")
     return x
