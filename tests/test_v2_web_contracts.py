@@ -26,6 +26,14 @@ class TestV2WebContracts(unittest.TestCase):
         self.assertIn("Semua saham", UI)
         self.assertIn('stage3.get("candidates")', UI)
 
+    def test_full_universe_control_precedes_horizon_top3_tabs(self):
+        all_control = 'with st.expander("Lihat semua saham", expanded=False):'
+        render_start = UI.index("def render_opportunity_funnel")
+        funnel_ui = UI[render_start:]
+        horizon_tabs = 'swing_tab, long_tab = st.tabs(["Swing", "Jangka Panjang"])'
+        self.assertEqual(funnel_ui.count(all_control), 1)
+        self.assertLess(funnel_ui.index(all_control), funnel_ui.index(horizon_tabs))
+
     def test_user_horizons_and_price_terms_are_consistent(self):
         self.assertIn('st.tabs(["Swing", "Jangka Panjang"])', UI)
         self.assertIn("Area beli", UI)
