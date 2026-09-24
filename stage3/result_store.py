@@ -1,9 +1,11 @@
 from __future__ import annotations
-import hashlib, json, math, os, tempfile
+import hashlib, json, math, os
 from datetime import datetime
 from pathlib import Path
+from storage_adapter import JsonStore
 
 RESULT_VERSION = 1
+_NAMESPACE = "analysis_results"
 
 def _find_sis_root(here):
     for parent in Path(here).parents:
@@ -11,20 +13,24 @@ def _find_sis_root(here):
             return parent
     return None
 
-def _default_root():
+def _data_root():
     override = os.environ.get("SIS_DATA_DIR", "").strip()
     if override:
-        return Path(override).expanduser() / "analysis_results"
+        return Path(override).expanduser()
     here = Path(__file__).resolve()
     sis_root = _find_sis_root(here)
     if sis_root is not None:
-        return sis_root / "SIS_DATA" / "analysis_results"
-    return here.parents[1] / "data" / "analysis_results"
+        return sis_root / "SIS_DATA"
+    return here.parents[1] / "data"
 
-def _root(base_dir=None):
-    p = Path(base_dir) if base_dir else _default_root()
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+def _default_root():
+    return _data_root() / _NAMESPACE
+
+def _store(base_dir=None):
+    if base_dir is not None:
+        p = Path(base_dir)
+        return JsonStore(p.parent if p.name == _NAMESPACE else p)
+    return JsonStore(_data_root())
 
 def _safe_id(snapshot_id):
     sid = str(snapshot_id or "")
@@ -46,19 +52,6 @@ def _json_scalar(v):
     if isinstance(v, (str, int, float, bool)): return v
     return str(v)
 
-def _atomic_write(path, payload):
-    path = Path(path)
-    fd, tmp = tempfile.mkstemp(prefix=path.name+".", suffix=".tmp", dir=str(path.parent), text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2, default=_json_scalar)
-            f.flush(); os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        try: os.unlink(tmp)
-        except OSError: pass
-        raise
-
 def _digest(stage3):
     body = json.dumps(stage3, ensure_ascii=False, sort_keys=True, separators=(",",":"), default=_json_scalar)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -78,18 +71,18 @@ def save_analysis_result(snapshot_id, stage3, analysis_as_of, base_dir=None, now
         "stage3_digest": _digest(stage3),
         "stage3": stage3,
     }
-    path = _root(base_dir) / (sid + ".json")
-    if path.exists():
-        old = json.loads(path.read_text(encoding="utf-8"))
+    store = _store(base_dir)
+    if store.exists(_NAMESPACE, sid):
+        old = store.get(_NAMESPACE, sid)
         if old.get("snapshot_id") != sid: raise ValueError("RESULT_ID_CONFLICT")
         if old.get("stage3_digest") == payload["stage3_digest"]: return old
         raise ValueError("RESULT_CONTENT_CONFLICT")
-    _atomic_write(path, payload)
+    store.put(_NAMESPACE, sid, payload, overwrite=False)
     return payload
 
 def load_analysis_result(snapshot_id, base_dir=None):
     sid = _safe_id(snapshot_id)
-    x = json.loads((_root(base_dir)/(sid+".json")).read_text(encoding="utf-8"))
+    x = _store(base_dir).get(_NAMESPACE, sid)
     if x.get("version") != RESULT_VERSION or x.get("snapshot_id") != sid or x.get("status") != "COMPLETE":
         raise ValueError("INVALID_ANALYSIS_RESULT")
     s3 = x.get("stage3")
@@ -98,5 +91,5 @@ def load_analysis_result(snapshot_id, base_dir=None):
     return x
 
 def result_exists(snapshot_id, base_dir=None):
-    try: return (_root(base_dir)/(_safe_id(snapshot_id)+".json")).is_file()
+    try: return _store(base_dir).exists(_NAMESPACE, _safe_id(snapshot_id))
     except ValueError: return False
