@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional, Tuple
-from pipeline_contracts import Evidence, EvidenceOrigin, QualityState
+from integration_pipeline.pipeline_contracts import Evidence, EvidenceOrigin, QualityState
 
 STORE_VERSION = "P3-R1"
 RAW_ORIGINS = {EvidenceOrigin.ENRICH_RAW, EvidenceOrigin.EVENT_EVIDENCE}

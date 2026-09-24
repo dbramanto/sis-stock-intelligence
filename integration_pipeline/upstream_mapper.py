@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
-from pipeline_contracts import (
+from integration_pipeline.pipeline_contracts import (
     ConflictState, DeepAnalysisScope, DependencyRef, Evidence, EvidenceOrigin,
     FreshnessState, PeriodRef, PeriodType, Provenance, QualityState, ScopeState,
 )
