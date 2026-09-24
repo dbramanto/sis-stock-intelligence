@@ -56,6 +56,16 @@ class TestV2WebContracts(unittest.TestCase):
         self.assertIn("Unduh Snapshot", APP)
         self.assertIn("Unduh Snapshot Valid", APP)
 
+    def test_top3_uses_single_detail_action(self):
+        self.assertIn('st.button("Buka rincian"', UI)
+        self.assertNotIn('key=f"funnel_swing_', UI)
+        self.assertNotIn('key=f"funnel_long_', UI)
+
+    def test_detail_explains_decision_without_internal_stage_copy(self):
+        self.assertIn("**Saran SIS**", UI)
+        self.assertIn("**Mengapa?**", UI)
+        self.assertNotIn("Rincian ini hanya menjelaskan hasil Stage 3", UI)
+
 
 if __name__ == "__main__":
     unittest.main()
