@@ -72,6 +72,12 @@ class TestV2WebContracts(unittest.TestCase):
         self.assertIn("Hasil analisis tersimpan dan dapat dimuat bersama snapshot ini.", APP)
         self.assertIn("Snapshot input valid tersedia. Hasil analisis belum tersimpan untuk snapshot ini.", APP)
 
+    def test_streamlit_browser_config_exists(self):
+        config = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("headless = true", config)
+        self.assertIn("enableXsrfProtection = true", config)
+        self.assertIn("gatherUsageStats = false", config)
+
 
 if __name__ == "__main__":
     unittest.main()
