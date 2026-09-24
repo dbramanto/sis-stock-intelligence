@@ -50,7 +50,7 @@ def _plain_reason(action):
     }.get(action, "Buka analisis lengkap untuk melihat dasar penilaian SIS.")
 
 
-def _top3_card(st, row, horizon):
+def _top3_card(st, row, horizon, on_symbol=None):
     rank = row.get("rank") or "—"
     symbol = row.get("symbol") or "—"
     action = row.get("action") or "—"
@@ -65,6 +65,8 @@ def _top3_card(st, row, horizon):
         st.write(f"Risiko: **{row.get('risk_summary') or 'Belum cukup data'}**")
         st.write(f"Konteks akumulasi: **{row.get('accumulation_context') or 'Belum cukup data'}**")
     st.caption(_plain_reason(action))
+    if on_symbol and st.button("Buka rincian", key=f"top3_{horizon}_{symbol}", use_container_width=True):
+        on_symbol(symbol, horizon)
 
 
 def _render_all(st, rows, horizon, on_symbol=None):
@@ -130,10 +132,10 @@ def render_stock_detail(st, stage3, symbol, horizon="swing"):
     syn = (c.get("synthesis") or {})
     st.markdown("---")
     st.subheader(f"Rincian {str(symbol).upper()}")
-    st.caption("Rincian ini hanya menjelaskan hasil Stage 3 yang sudah tersimpan; tidak menghitung skor atau keputusan baru.")
     swing_tab, long_tab = st.tabs(["Swing", "Jangka Panjang"])
     with swing_tab:
         action = _swing_action(c)
+        st.markdown("**Saran SIS**")
         st.markdown(f"### {_action_icon(action)} {action.title()}")
         a,b,c1,d = st.columns(4)
         a.metric("Harga analisis", _fmt_price(sw.get("current_price")))
@@ -141,15 +143,18 @@ def render_stock_detail(st, stage3, symbol, horizon="swing"):
         c1.metric("Target 1", _fmt_price(sw.get("target_1")))
         d.metric("Batas risiko", _fmt_price(sw.get("risk_boundary")))
         st.write(_plain_reason(action))
-        rr = sw.get("reward_risk") or {}
-        st.caption(f"Target 2: {_fmt_price(sw.get('target_2'))} · Reward/Risk T1: {rr.get('target_1') if rr.get('target_1') is not None else '—'} · Reward/Risk T2: {rr.get('target_2') if rr.get('target_2') is not None else '—'}")
+        st.markdown("**Mengapa?**")
         reasons = list(sw.get("reason_codes") or [])
         if reasons:
-            st.markdown("**Hal yang perlu diperhatikan**")
             for code in reasons:
                 st.write("• " + _reason_text(code))
+        else:
+            st.write("• Tidak ada penghambat utama yang tercatat pada hasil analisis Swing.")
+        rr = sw.get("reward_risk") or {}
+        st.caption(f"Target 2: {_fmt_price(sw.get('target_2'))} · Reward/Risk T1: {rr.get('target_1') if rr.get('target_1') is not None else '—'} · Reward/Risk T2: {rr.get('target_2') if rr.get('target_2') is not None else '—'}")
     with long_tab:
         action = _longterm_action(c)
+        st.markdown("**Saran SIS**")
         st.markdown(f"### {_action_icon(action)} {action.title()}")
         row = _longterm_row_for_detail(c)
         a,b,c1,d = st.columns(4)
@@ -158,6 +163,8 @@ def render_stock_detail(st, stage3, symbol, horizon="swing"):
         c1.metric("Kualitas bisnis", row["business_quality"])
         d.metric("Risiko", row["risk_summary"])
         st.write(_plain_reason(action))
+        st.markdown("**Mengapa?**")
+        st.write(f"Prospek jangka panjang: {row['prospect_summary']}. Kualitas bisnis: {row['business_quality']}. Valuasi: {row['price_assessment']}. Risiko: {row['risk_summary']}. Konteks akumulasi: {row['accumulation_context']}.")
         outlook = lt.get("outlook") or {}
         cols = st.columns(3)
         for col, period in zip(cols, ("1Y","3Y","5Y")):
@@ -201,9 +208,7 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
             cols = st.columns(len(top))
             for col, row in zip(cols, top):
                 with col:
-                    _top3_card(st, row, "swing")
-                    if on_symbol and st.button(row.get("symbol"), key=f"funnel_swing_{row.get('symbol')}", help="Klik kode saham untuk melihat analisis lengkap", use_container_width=True):
-                        on_symbol(row.get("symbol"), "swing")
+                    _top3_card(st, row, "swing", on_symbol)
         else:
             st.info("Belum ada peluang Swing yang siap dieksekusi. SIS menyarankan menunggu sampai ada saham yang memenuhi syarat entry. Seluruh saham tetap dapat dilihat di bagian “Lihat semua saham”.")
         with st.expander("Lihat semua saham", expanded=False):
@@ -215,9 +220,7 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
             cols = st.columns(len(top))
             for col, row in zip(cols, top):
                 with col:
-                    _top3_card(st, row, "long_term")
-                    if on_symbol and st.button(row.get("symbol"), key=f"funnel_long_{row.get('symbol')}", help="Klik kode saham untuk melihat analisis lengkap", use_container_width=True):
-                        on_symbol(row.get("symbol"), "long_term")
+                    _top3_card(st, row, "long_term", on_symbol)
         else:
             st.info("Belum ada saham yang memenuhi kriteria ranking Jangka Panjang pada data analisis ini.")
         with st.expander("Lihat semua saham", expanded=False):
