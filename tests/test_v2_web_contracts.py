@@ -66,6 +66,12 @@ class TestV2WebContracts(unittest.TestCase):
         self.assertIn("**Mengapa?**", UI)
         self.assertNotIn("Rincian ini hanya menjelaskan hasil Stage 3", UI)
 
+    def test_snapshot_history_shows_user_relevant_status(self):
+        self.assertIn("Status analisis", APP)
+        self.assertIn("Jumlah saham", APP)
+        self.assertIn("Hasil analisis tersimpan dan dapat dimuat bersama snapshot ini.", APP)
+        self.assertIn("Snapshot input valid tersedia. Hasil analisis belum tersimpan untuk snapshot ini.", APP)
+
 
 if __name__ == "__main__":
     unittest.main()
