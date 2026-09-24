@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
+import json
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
@@ -107,10 +109,31 @@ def _clear_analysis_state():
     for key in ("v2_stage1", "v2_packages", "v2_stage3", "v2_snapshot_id", "v2_blocked", "v2_detail_symbol", "v2_detail_horizon"):
         st.session_state.pop(key, None)
 
-def _market_label():
-    now = datetime.now(); hm = now.hour * 60 + now.minute
-    opened = now.weekday() < 5 and 9 * 60 <= hm <= 16 * 60
-    return ("Market Buka", "Input direkomendasikan setelah market tutup", "open") if opened else ("Market Tutup", "Waktu terbaik untuk input data", "closed")
+JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
+
+def _jakarta_now():
+    return datetime.now(JAKARTA_TZ)
+
+def _market_label(now=None):
+    now = now or _jakarta_now()
+    hm = now.hour * 60 + now.minute
+    weekday = now.weekday() < 5
+    # Practical IDX session window in WIB for user-facing status.
+    opened = weekday and 9 * 60 <= hm < 16 * 60
+    if opened:
+        return ("Market Buka", "Input direkomendasikan setelah market tutup", "open")
+    return ("Market Tutup", "Waktu terbaik untuk input data", "closed")
+
+def _last_closed_market_date(now=None):
+    now = now or _jakarta_now()
+    d = now.date()
+    hm = now.hour * 60 + now.minute
+    # During an open weekday session, today's closing data is not final yet.
+    if now.weekday() < 5 and 9 * 60 <= hm < 16 * 60:
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 def _theme_css(theme):
     dark = theme == "dark"
@@ -146,16 +169,19 @@ label,p,.stMarkdown{{color:var(--text)}}
 [data-baseweb="tab-list"]{{gap:5px;background:var(--surface2);padding:5px;border:1px solid var(--border);border-radius:9px}}
 button[data-baseweb="tab"]{{height:34px;border-radius:7px;padding:0 12px;color:var(--muted)}}button[data-baseweb="tab"][aria-selected="true"]{{background:var(--blue)!important;color:white!important;font-weight:800}}
 [data-testid="stMetric"]{{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 11px}}[data-testid="stMetricLabel"]{{color:var(--muted)}}[data-testid="stMetricValue"]{{color:var(--text);font-size:20px}}
-.stButton>button{{border-radius:8px;border:1px solid var(--border);font-weight:750}}.stButton>button[kind="primary"]{{background:linear-gradient(180deg,#2383ee,#0d66cf);border:0;min-height:44px}}
+.stButton>button{{border-radius:8px;border:1px solid var(--border);font-weight:750;background:var(--surface)!important;color:var(--text)!important}}.stButton>button:hover{{border-color:var(--blue)!important;color:var(--blue)!important}}.stButton>button[kind="primary"]{{background:linear-gradient(180deg,#2383ee,#0d66cf)!important;color:white!important;border:0;min-height:44px}}
 .flow{{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}}.flow>div{{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center;font-size:11px;color:var(--muted)}}.flow b{{display:block;color:var(--text);font-size:12px;margin-bottom:2px}}
 .sis-footer{{display:flex;justify-content:space-between;padding:13px 2px;color:var(--muted);font-size:10px}}
 @media(max-width:900px){{.brand{{min-width:auto}}.brandtext,.nav,.readybox{{display:none}}.sis-header{{gap:10px}}.hstatus{{margin-left:auto}}.info-grid,.flow{{grid-template-columns:1fr}}}}
 </style>"""
 
 st.markdown(_theme_css(st.session_state.sis_theme), unsafe_allow_html=True)
-market, market_sub, market_state = _market_label(); now = datetime.now()
+now = _jakarta_now()
+market, market_sub, market_state = _market_label(now)
+closed_date = _last_closed_market_date(now)
+header_label = "Data penutupan terakhir yang dianalisis:" if market_state == "open" else "Data penutupan yang dianalisis:"
 
-st.markdown(f'''<div class="sis-header"><div class="brand"><div class="brandmark">SIS</div><div class="brandtext"><b>Smart Investment Screener</b><small>Analisis hari ini, rencana untuk esok.</small></div></div><div class="nav"><div class="navitem">⌂ &nbsp;Beranda</div><div class="navitem active">▤ &nbsp;Input Data</div><div class="navitem">▥ &nbsp;Hasil Screening</div><div class="navitem">◷ &nbsp;Riwayat</div><div class="navitem">ⓘ &nbsp;Panduan</div></div><div class="hstatus"><div class="datebox">▣ &nbsp; Data penutupan yang dianalisis:<br><b>{now.strftime('%d %B %Y')}</b><br>({market})</div><div class="readybox">✓ &nbsp;<b>D1 Input & Snapshot</b><br>{market_sub}</div></div></div>''', unsafe_allow_html=True)
+st.markdown(f'''<div class="sis-header"><div class="brand"><div class="brandmark">SIS</div><div class="brandtext"><b>Smart Investment Screener</b><small>Analisis hari ini, rencana untuk esok.</small></div></div><div class="nav"><div class="navitem">⌂ &nbsp;Beranda</div><div class="navitem active">▤ &nbsp;Input Data</div><div class="navitem">▥ &nbsp;Hasil Screening</div><div class="navitem">◷ &nbsp;Riwayat</div><div class="navitem">ⓘ &nbsp;Panduan</div></div><div class="hstatus"><div class="datebox">▣ &nbsp; {header_label}<br><b>{closed_date.strftime('%d %B %Y')}</b><br>({market})</div><div class="readybox">✓ &nbsp;<b>D1 Input & Snapshot</b><br>{market_sub}</div></div></div>''', unsafe_allow_html=True)
 
 head_l, head_r = st.columns([8.8,1.2], vertical_alignment="center")
 with head_l:
@@ -176,8 +202,17 @@ with side:
         else:
             labels = {f'{x["created_at"][:16].replace("T"," ")} · {x["snapshot_id"][-10:]}': x["snapshot_id"] for x in history[:8]}
             selected_history = st.selectbox("Snapshot", list(labels), label_visibility="collapsed")
+            selected_snapshot_id = labels[selected_history]
+            selected_snap = load_snapshot(selected_snapshot_id)
+            st.download_button(
+                "⬇ Unduh Snapshot",
+                data=json.dumps(selected_snap, ensure_ascii=False, indent=2),
+                file_name=f"{selected_snapshot_id}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
             if st.button("Muat Snapshot", use_container_width=True):
-                snap = load_snapshot(labels[selected_history])
+                snap = selected_snap
                 for bi in range(1, 12): st.session_state[f"v2_b{bi}"] = get_snapshot_batch(snap, bi)
                 md = snap.get("metadata") or {}
                 if md.get("filter_fingerprint"): st.session_state["loaded_filter_fp"] = str(md["filter_fingerprint"])
@@ -291,6 +326,16 @@ if st.session_state.get("v2_blocked"):
 if st.session_state.get("v2_snapshot_id"):
     st.success("Snapshot tervalidasi berhasil disiapkan.")
     a, b, c = st.columns(3); a.metric("Status", "VALIDATED"); b.metric("Saham", expected_total); c.metric("Snapshot", st.session_state["v2_snapshot_id"][-10:])
+    try:
+        active_snap = load_snapshot(st.session_state["v2_snapshot_id"])
+        st.download_button(
+            "⬇ Unduh Snapshot Valid",
+            data=json.dumps(active_snap, ensure_ascii=False, indent=2),
+            file_name=f'{st.session_state["v2_snapshot_id"]}.json',
+            mime="application/json",
+        )
+    except Exception as exc:
+        LOG.warning("[SNAPSHOT] DOWNLOAD PREP FAILED | id=%s | error=%s", st.session_state.get("v2_snapshot_id"), exc)
 
 if st.session_state.get("v2_stage3"):
     st.markdown("---")
