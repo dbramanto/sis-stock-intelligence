@@ -1,0 +1,38 @@
+name: D1 Audit Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  d1-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile D1 v2, Stage 1 and tests
+        run: python -m py_compile app_v2.py && python -m compileall -q stage1 tests/test_d1_validated_snapshot.py
+      - name: D1 validated snapshot tests
+        run: python -m unittest -v tests.test_d1_validated_snapshot
+      - name: Full regression suite
+        run: python -m unittest discover -s tests -p 'test*.py' -v
+      - name: Build clean candidate
+        run: |
+          mkdir -p candidate
+          rsync -a --exclude='.git' --exclude='.github' --exclude='candidate' --exclude='__pycache__' --exclude='*.pyc' ./ candidate/
+          python -m py_compile candidate/app_v2.py
+          test -f candidate/stage1/history.py
+          test -f candidate/requirements.txt
+      - name: Upload audited candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: SIS_v2_D1_candidate
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14
