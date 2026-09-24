@@ -72,6 +72,11 @@ class TestV2WebContracts(unittest.TestCase):
         self.assertIn("Hasil analisis tersimpan dan dapat dimuat bersama snapshot ini.", APP)
         self.assertIn("Snapshot input valid tersedia. Hasil analisis belum tersimpan untuk snapshot ini.", APP)
 
+    def test_repo_root_is_on_sys_path_before_stage_imports(self):
+        root_guard = 'if str(_APP_ROOT) not in sys.path:'
+        self.assertIn(root_guard, APP)
+        self.assertLess(APP.index(root_guard), APP.index("from stage1.clipboard import parse_clipboard_text"))
+
     def test_streamlit_browser_config_exists(self):
         config = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
         self.assertIn("headless = true", config)
