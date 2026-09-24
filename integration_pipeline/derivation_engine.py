@@ -5,7 +5,7 @@ from statistics import mean, median
 from typing import Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 from datetime import date
 
-from pipeline_contracts import (
+from integration_pipeline.pipeline_contracts import (
     ConflictState, DependencyRef, Evidence, EvidenceOrigin, FreshnessState,
     PeriodRef, PeriodType, Provenance, QualityState,
 )
