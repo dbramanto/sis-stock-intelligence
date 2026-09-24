@@ -199,6 +199,13 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
     st.subheader("Peluang Utama SIS")
     st.caption(f"{funnel.get('candidate_count', 0)} saham dianalisis. Top 3 membantu fokus; seluruh saham tetap dapat dilihat.")
     st.info("Rencana Swing paling baik disiapkan setelah market tutup. Area beli, target, dan batas risiko adalah rencana untuk sesi market berikutnya berdasarkan data analisis yang digunakan.")
+    with st.expander("Lihat semua saham", expanded=False):
+        all_swing_tab, all_long_tab = st.tabs(["Swing", "Jangka Panjang"])
+        with all_swing_tab:
+            _render_all(st, funnel["swing"]["all"], "swing", on_symbol)
+        with all_long_tab:
+            _render_all(st, funnel["long_term"]["all"], "long_term", on_symbol)
+
     swing_tab, long_tab = st.tabs(["Swing", "Jangka Panjang"])
 
     with swing_tab:
@@ -211,8 +218,6 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
                     _top3_card(st, row, "swing", on_symbol)
         else:
             st.info("Belum ada peluang Swing yang siap dieksekusi. SIS menyarankan menunggu sampai ada saham yang memenuhi syarat entry. Seluruh saham tetap dapat dilihat di bagian “Lihat semua saham”.")
-        with st.expander("Lihat semua saham", expanded=False):
-            _render_all(st, funnel["swing"]["all"], "swing", on_symbol)
 
     with long_tab:
         top = funnel["long_term"]["top3"]
@@ -223,8 +228,6 @@ def render_opportunity_funnel(st, stage3, on_symbol=None):
                     _top3_card(st, row, "long_term", on_symbol)
         else:
             st.info("Belum ada saham yang memenuhi kriteria ranking Jangka Panjang pada data analisis ini.")
-        with st.expander("Lihat semua saham", expanded=False):
-            _render_all(st, funnel["long_term"]["all"], "long_term", on_symbol)
 
     st.caption("Top 3 mengikuti ranking engine SIS. Funnel tidak membuat skor baru dan tidak mengubah keputusan analitis Stage 3.")
     return funnel
