@@ -2,13 +2,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
-from pipeline_contracts import Evidence, QualityState
-from upstream_mapper import map_stage2_output
-from raw_evidence_store import RawEvidenceStore
-from validation_gate import run_gate
-from derivation_engine import derive_metric, DerivationError
-from pipeline_p6_reconciliation import ComparableEvidence, reconcile
-from pipeline_p9_payload import MetricEvidence, build_stage3_payload, validate_payload_shape
+from integration_pipeline.pipeline_contracts import Evidence, QualityState
+from integration_pipeline.upstream_mapper import map_stage2_output
+from integration_pipeline.raw_evidence_store import RawEvidenceStore
+from integration_pipeline.validation_gate import run_gate
+from integration_pipeline.derivation_engine import derive_metric, DerivationError
+from integration_pipeline.pipeline_p6_reconciliation import ComparableEvidence, reconcile
+from integration_pipeline.pipeline_p9_payload import MetricEvidence, build_stage3_payload, validate_payload_shape
 
 @dataclass(frozen=True)
 class DerivationRequest:
