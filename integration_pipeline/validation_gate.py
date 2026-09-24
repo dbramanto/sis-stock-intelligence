@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import date
 from math import isfinite
 from typing import Dict, Iterable, Mapping, Optional, Tuple
-from pipeline_contracts import Evidence, FreshnessState, PeriodType, QualityState
+from integration_pipeline.pipeline_contracts import Evidence, FreshnessState, PeriodType, QualityState
 
 GATE_VERSION = "P4-R1"
 
