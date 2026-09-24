@@ -200,10 +200,22 @@ with side:
         if not history:
             st.info("Belum ada snapshot tervalidasi.")
         else:
-            labels = {f'{x["created_at"][:16].replace("T"," ")} · {x["snapshot_id"][-10:]}': x["snapshot_id"] for x in history[:8]}
+            labels = {}
+            for x in history[:8]:
+                snap = load_snapshot(x["snapshot_id"])
+                md = snap.get("metadata") or {}
+                analysis_status = md.get("analysis_status") or "PENDING"
+                total = md.get("expected_total") or "—"
+                stamp = x["created_at"][:16].replace("T"," ")
+                labels[f"{stamp} · {total} saham · {analysis_status}"] = x["snapshot_id"]
             selected_history = st.selectbox("Snapshot", list(labels), label_visibility="collapsed")
             selected_snapshot_id = labels[selected_history]
             selected_snap = load_snapshot(selected_snapshot_id)
+            selected_md = selected_snap.get("metadata") or {}
+            s1, s2, s3 = st.columns(3)
+            s1.metric("Status analisis", selected_md.get("analysis_status") or "PENDING")
+            s2.metric("Jumlah saham", selected_md.get("expected_total") or "—")
+            s3.metric("Sesi", selected_md.get("filter_fingerprint") or "—")
             st.download_button(
                 "⬇ Unduh Snapshot",
                 data=json.dumps(selected_snap, ensure_ascii=False, indent=2),
@@ -211,6 +223,10 @@ with side:
                 mime="application/json",
                 use_container_width=True,
             )
+            if result_exists(selected_snapshot_id):
+                st.caption("Hasil analisis tersimpan dan dapat dimuat bersama snapshot ini.")
+            else:
+                st.caption("Snapshot input valid tersedia. Hasil analisis belum tersimpan untuk snapshot ini.")
             if st.button("Muat Snapshot", use_container_width=True):
                 snap = selected_snap
                 for bi in range(1, 12): st.session_state[f"v2_b{bi}"] = get_snapshot_batch(snap, bi)
